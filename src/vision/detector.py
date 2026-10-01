@@ -224,13 +224,22 @@ class PerceptionDetector:
         )
 
     def _find_closest_candidate(self, observations: List[FrameObservation]) -> Optional[FrameObservation]:
-        """Finds candidate track matching resident's spatial proximity and bed overlap."""
-        if not observations or self.last_known_center is None or self.last_known_bbox is None:
+        """Finds candidate track matching resident's spatial proximity, bed overlap, and posture changes."""
+        if not observations or self.last_known_center is None:
             return None
 
         candidates = [o for o in observations if o.bbox is not None]
         if not candidates:
             return None
+
+        # In single-person scenarios, if the only detected person is in/near the bed, reacquire seamlessly
+        if len(candidates) == 1:
+            cand = candidates[0]
+            bx1, by1, bx2, by2 = cand.bbox  # type: ignore
+            c = np.array([(bx1 + bx2) / 2.0, (by1 + by2) / 2.0])
+            dist = float(np.linalg.norm(c - self.last_known_center))
+            if cand.bed_overlap > 0.05 or dist < 500.0:
+                return cand
 
         best_obs: Optional[FrameObservation] = None
         min_dist = float("inf")
@@ -240,9 +249,16 @@ class PerceptionDetector:
             c = np.array([(bx1 + bx2) / 2.0, (by1 + by2) / 2.0])
             dist = float(np.linalg.norm(c - self.last_known_center))
 
-            iou = self._bbox_iou(obs.bbox, self.last_known_bbox)  # type: ignore
+            iou = self._bbox_iou(obs.bbox, self.last_known_bbox) if self.last_known_bbox else 0.0
 
-            if iou > 0.15 or dist < self.max_reacquire_dist:
+            # Allow reacquisition on spatial proximity, IoU overlap, or high bed affinity
+            is_valid_reacquire = (
+                iou > 0.15
+                or dist < self.max_reacquire_dist
+                or (obs.bed_overlap > 0.25 and dist < 450.0)
+            )
+
+            if is_valid_reacquire:
                 if dist < min_dist:
                     min_dist = dist
                     best_obs = obs

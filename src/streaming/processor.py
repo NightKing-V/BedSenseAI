@@ -115,31 +115,46 @@ class StreamingProcessor:
             logger.state(f"[STREAM START] Initial Resident State at {format_hms(t)}: {state} (Confidence: {conf*100:.0f}%)")
             return self._build_live_status(t, state, conf, obs)
 
+        in_bed_states = {STATE_LYING_IN_BED, STATE_SITTING_ON_BED}
+
         # 2. State Continuity or Blip Return
         if state == self.active_state:
-            # If a transient state was pending, but reverted before min_segment_sec, absorb the blip
+            # If a transient state was pending, but reverted before threshold, absorb the blip
             if self.pending_state is not None:
                 self.pending_state = None
                 self.pending_confs.clear()
             self.active_confs.append(conf)
 
-        # 3. New Candidate State Transition
+        # 3. Candidate State Transition
         else:
-            if self.pending_state != state:
+            # Determine threshold: intra-bed switches (lying <-> sitting on bed) use fast 0.35s confirmation
+            if self.active_state in in_bed_states and state in in_bed_states:
+                required_duration = min(0.35, self.min_segment_sec)
+            else:
+                required_duration = self.min_segment_sec
+
+            # Fast In-Bed Handoff: if pending_state was already in-bed, and new state is also in-bed, preserve pending_start_t!
+            is_in_bed_handoff = (
+                self.pending_state in in_bed_states
+                and state in in_bed_states
+            )
+
+            if self.pending_state != state and not is_in_bed_handoff:
                 # Start timing a new candidate state
                 self.pending_state = state
                 self.pending_start_t = t
                 self.pending_confs = [conf]
             else:
-                # Pending state continues
+                # In-bed handoff updates the pending state name while preserving entry start time
+                if is_in_bed_handoff and self.pending_state != state:
+                    self.pending_state = state
                 self.pending_confs.append(conf)
 
                 # Check if pending state has persisted long enough to confirm a valid transition (§3)
-                if (t - self.pending_start_t) >= self.min_segment_sec:
+                if (t - self.pending_start_t) >= required_duration:
                     self._commit_transition(t)
 
         # 4. Check for real-time live events (e.g. missing threshold >= 10s or out_of_bed -> unknown)
-        in_bed_states = {STATE_LYING_IN_BED, STATE_SITTING_ON_BED}
         if self.active_state not in in_bed_states:
             self._evaluate_live_events(t)
 
