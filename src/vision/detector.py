@@ -1,179 +1,21 @@
 """
-Vision Layer for BedSense AI (derived from src-old perception engine).
-Handles YOLO-based dynamic bed calibration, single-pass YOLO-Pose detection, ByteTrack tracking,
-robust multi-person resident tracking, and continuous geometric bed overlap computation in image space.
+Primary Vision Detector & Resident Tracking Engine for BedSense AI (§3.1 of Design Spec).
 """
 
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
-import cv2
 import numpy as np
 from ultralytics import YOLO
 
-from .contracts import FrameObservation
-
-
-class BedRelationEngine:
-    """
-    Detects patient bed coordinates dynamically using YOLO in 2D image space
-    and computes continuous geometric overlap without synthetic fallbacks or 3D homography assumptions.
-    """
-
-    def __init__(
-        self,
-        model_path: str = "yolo11n.pt",
-        polygon: Optional[Union[List, np.ndarray]] = None,
-        confidence_thresh: float = 0.12,
-        device: str = "cpu",
-    ):
-        self.model_path = model_path
-        self.confidence_thresh = confidence_thresh
-        self.device = device
-        self.polygon: Optional[np.ndarray] = None
-        self.bbox: Optional[Tuple[float, float, float, float]] = None
-        self.is_calibrated: bool = False
-
-        if polygon is not None:
-            self.set_polygon(polygon)
-
-    def auto_calibrate_from_video(self, video_path: Union[str, Path], sample_frames: int = 15) -> Optional[np.ndarray]:
-        """Dynamically detect bed box from sample video frames."""
-        cap = cv2.VideoCapture(str(video_path))
-        if not cap.isOpened():
-            return self.polygon
-
-        frames: List[np.ndarray] = []
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        step = max(1, total_frames // max(1, sample_frames))
-
-        idx = 0
-        while len(frames) < sample_frames:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            if idx % step == 0:
-                frames.append(frame)
-            idx += 1
-        cap.release()
-
-        return self.calibrate_from_frames(frames)
-
-    def calibrate_from_frames(self, frames: List[np.ndarray]) -> Optional[np.ndarray]:
-        """Run YOLO to find median bed/couch box across sampled frames."""
-        if not frames:
-            self.polygon = None
-            self.bbox = None
-            self.is_calibrated = False
-            return None
-
-        boxes: List[Tuple[float, float, float, float]] = []
-        try:
-            model = YOLO(self.model_path)
-            for frame in frames:
-                res = model(frame, conf=self.confidence_thresh, verbose=False, device=self.device)[0]
-                if res.boxes is not None and len(res.boxes) > 0:
-                    for c, xyxy in zip(res.boxes.cls.cpu().numpy(), res.boxes.xyxy.cpu().numpy()):
-                        if model.names.get(int(c)) in ["bed", "couch"]:
-                            boxes.append((float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])))
-        except Exception:
-            pass
-
-        if boxes:
-            x1, y1, x2, y2 = np.median(np.array(boxes), axis=0)
-            self.set_polygon(np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float32))
-            self.is_calibrated = True
-        else:
-            # Explicitly uncalibrated when no bed detected (no synthetic fallback)
-            self.polygon = None
-            self.bbox = None
-            self.is_calibrated = False
-
-        return self.polygon
-
-    def set_polygon(self, points: Union[List, np.ndarray]):
-        """Set 2D bed polygon coordinates in image space."""
-        self.polygon = np.array(points, dtype=np.float32).reshape(-1, 2)
-        if len(self.polygon) >= 3:
-            self.bbox = (
-                float(np.min(self.polygon[:, 0])),
-                float(np.min(self.polygon[:, 1])),
-                float(np.max(self.polygon[:, 0])),
-                float(np.max(self.polygon[:, 1])),
-            )
-            self.is_calibrated = True
-        else:
-            self.polygon = None
-            self.bbox = None
-            self.is_calibrated = False
-
-    def get_bed_longitudinal_axis(self) -> Optional[np.ndarray]:
-        """Returns normalized 2D vector along the bed length axis in image space."""
-        if self.polygon is None or len(self.polygon) < 4:
-            return None
-        top_mid = (self.polygon[0] + self.polygon[1]) / 2.0
-        bot_mid = (self.polygon[3] + self.polygon[2]) / 2.0
-        vec = bot_mid - top_mid
-        norm = float(np.linalg.norm(vec))
-        if norm > 1e-3:
-            return vec / norm
-        return None
-
-    def get_bed_transverse_axis(self) -> Optional[np.ndarray]:
-        """Returns normalized 2D vector along the bed width axis in image space."""
-        if self.polygon is None or len(self.polygon) < 4:
-            return None
-        left_mid = (self.polygon[0] + self.polygon[3]) / 2.0
-        right_mid = (self.polygon[1] + self.polygon[2]) / 2.0
-        vec = right_mid - left_mid
-        norm = float(np.linalg.norm(vec))
-        if norm > 1e-3:
-            return vec / norm
-        return None
-
-    def compute_overlap(
-        self,
-        bbox: Optional[Tuple[float, float, float, float]],
-        keypoints: Optional[np.ndarray] = None,
-    ) -> float:
-        """
-        Computes continuous geometric overlap ratio: Area(Person ∩ Bed) / Area(Person).
-        Returns 0.0 if bed is not calibrated/detected.
-        """
-        if self.bbox is None or bbox is None or not self.is_calibrated:
-            return 0.0
-
-        px1, py1, px2, py2 = bbox
-        bx1, by1, bx2, by2 = self.bbox
-
-        p_area = max(0.0, px2 - px1) * max(0.0, py2 - py1)
-        if p_area <= 1e-6:
-            return 0.0
-
-        ix1, iy1 = max(px1, bx1), max(py1, by1)
-        ix2, iy2 = min(px2, bx2), min(py2, by2)
-        i_area = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
-
-        area_overlap = i_area / p_area
-
-        if keypoints is not None and len(keypoints) == 17:
-            valid = keypoints[:, 2] > 0.25
-            if np.any(valid):
-                pts = keypoints[valid, :2]
-                in_bed = np.sum((pts[:, 0] >= bx1) & (pts[:, 0] <= bx2) & (pts[:, 1] >= by1) & (pts[:, 1] <= by2))
-                kpt_ratio = in_bed / len(pts)
-                return float(np.clip(0.55 * area_overlap + 0.45 * kpt_ratio, 0.0, 1.0))
-
-        return float(np.clip(area_overlap, 0.0, 1.0))
-
-    def get_polygon(self) -> Optional[np.ndarray]:
-        return self.polygon
+from ..contracts import FrameObservation
+from .bed_engine import BedRelationEngine
 
 
 class PerceptionDetector:
     """
     Unified Primary Vision module.
     Runs YOLO-Pose with ByteTrack to track persons, extract 17 COCO keypoints,
-    and maintains persistent resident identity when multiple people (caregivers, visitors) are present.
+    and maintains persistent resident identity when multiple people are present.
     """
 
     def __init__(
@@ -243,9 +85,7 @@ class PerceptionDetector:
         frame: np.ndarray,
         timestamp: float,
     ) -> List[FrameObservation]:
-        """
-        Process single video frame with YOLO-Pose and ByteTrack.
-        """
+        """Process single video frame with YOLO-Pose and ByteTrack."""
         results = self.model.track(
             source=frame,
             persist=True,
@@ -341,7 +181,6 @@ class PerceptionDetector:
 
         # 1. First-time resident track initialization
         if self.primary_track_id is None:
-            # Prefer person with highest bed overlap (resident in/on bed)
             sorted_obs = sorted(all_obs, key=lambda o: (o.bed_overlap, o.mean_kpt_conf), reverse=True)
             chosen = sorted_obs[0]
             self._update_resident_state(chosen, timestamp)
@@ -350,14 +189,14 @@ class PerceptionDetector:
         # 2. Check if primary track ID exists in current frame
         direct_match = next((o for o in all_obs if o.track_id == self.primary_track_id), None)
         if direct_match is not None and direct_match.bbox is not None:
-            # Check for sudden keypoint teleportation (> 250px jump in < 0.2s)
-            c_new = np.array([(direct_match.bbox[0] + direct_match.bbox[2]) / 2.0,
-                              (direct_match.bbox[1] + direct_match.bbox[3]) / 2.0])
+            c_new = np.array([
+                (direct_match.bbox[0] + direct_match.bbox[2]) / 2.0,
+                (direct_match.bbox[1] + direct_match.bbox[3]) / 2.0,
+            ])
             if self.last_known_center is not None:
                 dist = float(np.linalg.norm(c_new - self.last_known_center))
                 dt = max(1e-3, timestamp - self.last_seen_ts)
                 if dist > 250.0 and dt < 0.3 and len(all_obs) > 1:
-                    # Potential tracker swap to another person; verify if another track is closer
                     closest_candidate = self._find_closest_candidate(all_obs)
                     if closest_candidate is not None:
                         direct_match = closest_candidate
@@ -374,8 +213,7 @@ class PerceptionDetector:
             self._update_resident_state(smoothed_obs, timestamp)
             return smoothed_obs
 
-        # 4. Resident not detected near last known location (e.g. only caregiver elsewhere in room)
-        # Avoid switching to caregiver
+        # 4. Resident not detected near last known location
         return FrameObservation(
             t=timestamp,
             track_id=None,
@@ -402,10 +240,8 @@ class PerceptionDetector:
             c = np.array([(bx1 + bx2) / 2.0, (by1 + by2) / 2.0])
             dist = float(np.linalg.norm(c - self.last_known_center))
 
-            # Calculate BBox IoU
             iou = self._bbox_iou(obs.bbox, self.last_known_bbox)  # type: ignore
 
-            # If inside bed region or close to last location
             if iou > 0.15 or dist < self.max_reacquire_dist:
                 if dist < min_dist:
                     min_dist = dist
@@ -434,7 +270,6 @@ class PerceptionDetector:
         kpts = obs.keypoints.copy()
         for j in range(17):
             if kpts[j, 2] > 0.25 and self.last_known_kpts[j, 2] > 0.25:
-                # 85% new measurement + 15% previous frame
                 kpts[j, :2] = 0.85 * kpts[j, :2] + 0.15 * self.last_known_kpts[j, :2]
 
         return FrameObservation(
@@ -454,10 +289,14 @@ class PerceptionDetector:
 
         ix1, iy1 = max(ax1, bx1), max(ay1, by1)
         ix2, iy2 = min(ax2, bx2), min(ay2, by2)
-        iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+        iw = max(0.0, ix2 - ix1)
+        ih = max(0.0, iy2 - iy1)
         inter = iw * ih
 
         area_a = max(1e-6, (ax2 - ax1) * (ay2 - ay1))
         area_b = max(1e-6, (bx2 - bx1) * (by2 - by1))
         union = area_a + area_b - inter
         return float(inter / max(1e-6, union))
+
+
+__all__ = ["PerceptionDetector"]

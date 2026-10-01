@@ -1,10 +1,12 @@
 # ==============================================================================
-# BedSense AI — System Configuration and Decision Thresholds
+# BedSense AI — System Configuration, Decision Thresholds & Logging Settings
 # ==============================================================================
 
 perception:
-  pose_model: "yolo11n-pose.pt" # Ultralytics pose model (17 COCO keypoints)
-  pose_conf: 0.25 # Minimum confidence to detect person/pose
+  detector_model: "yolo11l.pt" # YOLO object detection model for bed/furniture auto-calibration
+  pose_model: "yolo11l-pose.pt" # Ultralytics pose model (17 COCO keypoints)
+  pose_conf: 0.20 # Minimum confidence to detect person/pose
+  bed_conf: 0.12 # Minimum confidence to detect bed/furniture bounding box
   tracker_config: "bytetrack.yaml" # Built-in ByteTrack multi-object tracker
   target_fps: 10.0 # Target processing frame rate
 
@@ -26,10 +28,10 @@ state_classification:
 
 temporal:
   # Smoothing & temporal engine rules (§3 & §4)
-  min_segment_sec: 2.0 # State must be held >= 2.0s to form a distinct segment (collapses blips)
+  min_segment_sec: 0.5 # State must be held >= 1.0s to form a distinct segment (collapses blips)
   min_exit_confirm_sec: 3.0 # Sustained walking/out_of_bed duration required to confirm bed exit
-  return_window_sec: 30.0 # Max time window to complete return transition to bed
-  context_window_sec: 30.0 # Surrounding context history window [t - 30s, t + 30s] provided to Agent LLM
+  return_window_sec: 10.0 # Max time window to complete return transition to bed
+  context_window_sec: 5.0 # Surrounding context history window [t - 5s, t + 5s] provided to Agent LLM
 
 confidence:
   # §4.1 Ambiguity scoring triggers
@@ -38,7 +40,7 @@ confidence:
 
 agent:
   # §5 Agent LLM & VLM settings via Ollama
-  ollama_base_url: "http://localhost:11434" # Ollama server endpoint (use http://ollama:11434 inside Docker)
+  ollama_base_url: "http://ollama:11434" # Ollama server endpoint in Docker network
   text_model: "qwen2.5:3b" # Text reasoning agent model (e.g. qwen2.5:3b, qwen3:4b)
   vlm_model: "qwen2.5vl:3b" # Vision language model for vlm_describe tool
   tool_call_limit: 4 # Hard cap on tool calls per ambiguous segment
@@ -47,7 +49,16 @@ agent:
 
 policy:
   # §6.1 Alert policy rules
-  edge_sit_monitor_sec: 300.0 # Sitting on bed edge > 300s (5 min) -> MONITOR
-  unknown_monitor_sec: 60.0 # Sustained UNKNOWN > 60s (1 min) -> MONITOR
-  out_of_bed_alert_sec: 600.0 # Confirmed bed exit, out of bed > 600s (10 min) -> ALERT
+  edge_sit_monitor_sec: 10.0 # Sitting on bed edge > 10s -> MONITOR
+  unknown_monitor_sec: 10.0 # Sustained UNKNOWN > 10s -> MONITOR
+  out_of_bed_alert_sec: 10.0 # Prolonged absence from bed > 10s -> ALERT
   caregiver_suppress_escalation: true # Presence of caregiver track lowers alert escalation by one level
+
+logging:
+  # Logging verbosity level configuration
+  # Options:
+  #   - PROD   : Production mode — State transitions & clinical alerts (bed_exit, missing, bed_return) + final reports only
+  #   - INFO   : Operational mode — Adds video ingestion progress (FPS/timestamp) & export logs
+  #   - AGENT  : Agent debug mode — Adds LangGraph reasoning loops, LLM structured prompts/responses & tool traces
+  #   - DEBUG  : Full telemetry mode — Adds per-frame keypoint confidences & raw polygon overlap ratios
+  default_level: "PROD"

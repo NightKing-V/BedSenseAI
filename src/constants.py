@@ -26,6 +26,7 @@ ALL_STATES: Set[str] = {
 # Events & Alert Decisions
 EVENT_BED_EXIT = "bed_exit"
 EVENT_BED_RETURN = "bed_return"
+EVENT_MISSING = "missing"
 
 DECISION_NORMAL = "NORMAL"
 DECISION_MONITOR = "MONITOR"

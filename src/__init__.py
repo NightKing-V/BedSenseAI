@@ -2,6 +2,12 @@
 BedSense AI — Vision -> Temporal Processing -> State Mechanism Monitoring System.
 """
 
+from .agent import (
+    AgentGraphState,
+    AgentToolSuite,
+    LangGraphAgentWorkflow,
+    OllamaClient,
+)
 from .constants import (
     ALL_STATES,
     DECISION_ALERT,
@@ -9,6 +15,7 @@ from .constants import (
     DECISION_NORMAL,
     EVENT_BED_EXIT,
     EVENT_BED_RETURN,
+    EVENT_MISSING,
     STATE_COLORS,
     STATE_LYING_IN_BED,
     STATE_OUT_OF_BED,
@@ -18,14 +25,23 @@ from .constants import (
     STATE_UNKNOWN,
     STATE_WALKING,
 )
-from .contracts import BedEvent, FrameObservation, StateSegment
-from .state import (
-    BedPatternMatcher,
-    CandidateEvent,
+from .logging_config import (
+    AGENT_LEVEL_NUM,
+    STATE_LEVEL_NUM,
+    BedSenseFormatter,
+    load_config,
+    setup_logger,
+)
+from .policy import (
     PolicyEngine,
     ReportGenerator,
     format_hms,
 )
+from .state import (
+    BedPatternMatcher,
+    CandidateEvent,
+)
+from .streaming import StreamingProcessor
 from .temporal import (
     FrameClassifier,
     TransitionSmoother,
@@ -38,11 +54,18 @@ __all__ = [
     # Vision Layer
     "BedRelationEngine",
     "PerceptionDetector",
+    # Streaming Layer
+    "StreamingProcessor",
     # Temporal Processing Layer
     "FrameClassifier",
     "TransitionSmoother",
     "smooth_states",
     "evaluate_ambiguity",
+    # LangGraph Agent Layer
+    "LangGraphAgentWorkflow",
+    "OllamaClient",
+    "AgentToolSuite",
+    "AgentGraphState",
     # State Mechanism & Policy Layer
     "BedPatternMatcher",
     "CandidateEvent",
@@ -53,6 +76,12 @@ __all__ = [
     "FrameObservation",
     "StateSegment",
     "BedEvent",
+    # Logging & Config
+    "setup_logger",
+    "load_config",
+    "BedSenseFormatter",
+    "AGENT_LEVEL_NUM",
+    "STATE_LEVEL_NUM",
     # Constants
     "ALL_STATES",
     "STATE_LYING_IN_BED",
@@ -64,6 +93,7 @@ __all__ = [
     "STATE_UNKNOWN",
     "EVENT_BED_EXIT",
     "EVENT_BED_RETURN",
+    "EVENT_MISSING",
     "DECISION_NORMAL",
     "DECISION_MONITOR",
     "DECISION_ALERT",
