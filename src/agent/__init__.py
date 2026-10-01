@@ -1,5 +1,5 @@
 """
-BedSense AI LangGraph Agentic Reasoning Subpackage (§5 of Design Spec).
+BedSense AI LangGraph Agentic Reasoning Subpackage.
 """
 
 from .client import OllamaClient

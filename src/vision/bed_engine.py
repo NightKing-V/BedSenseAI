@@ -1,5 +1,5 @@
 """
-Dynamic Bed Calibration & 2D Polygon Overlap Engine for BedSense AI (§3.2 of Design Spec).
+Dynamic Bed Calibration & 2D Polygon Overlap Engine for BedSense AI.
 """
 
 from pathlib import Path
@@ -7,6 +7,8 @@ from typing import List, Optional, Tuple, Union
 import cv2
 import numpy as np
 from ultralytics import YOLO
+
+from .model_utils import resolve_model_path
 
 
 class BedRelationEngine:
@@ -17,14 +19,16 @@ class BedRelationEngine:
 
     def __init__(
         self,
-        model_path: str = "yolo11n.pt",
+        model_path: str = "models/yolo11n.pt",
         polygon: Optional[Union[List, np.ndarray]] = None,
         confidence_thresh: float = 0.12,
         device: str = "cpu",
+        bed_classes: Optional[List[str]] = None,
     ):
-        self.model_path = model_path
+        self.model_path = resolve_model_path(model_path) if isinstance(model_path, (str, Path)) else model_path
         self.confidence_thresh = confidence_thresh
         self.device = device
+        self.bed_classes = bed_classes or ["hospital bed", "bed", "mattress", "couch"]
         self.polygon: Optional[np.ndarray] = None
         self.bbox: Optional[Tuple[float, float, float, float]] = None
         self.is_calibrated: bool = False
@@ -55,21 +59,39 @@ class BedRelationEngine:
         return self.calibrate_from_frames(frames)
 
     def calibrate_from_frames(self, frames: List[np.ndarray]) -> Optional[np.ndarray]:
-        """Run YOLO to find median bed/couch box across sampled frames."""
+        """Run YOLO / YOLO-World to find median bed/couch box across sampled frames."""
         if not frames:
             self.polygon = None
             self.bbox = None
             self.is_calibrated = False
             return None
 
+        # Ensure CLIP cache directory exists for YOLO-World
+        try:
+            Path("scripts/weights/clip").mkdir(parents=True, exist_ok=True)
+            Path("weights/clip").mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
         boxes: List[Tuple[float, float, float, float]] = []
         try:
-            model = YOLO(self.model_path)
+            resolved_model = resolve_model_path(self.model_path)
+            model = YOLO(resolved_model)
+            is_world_model = "world" in str(resolved_model).lower() or hasattr(model, "set_classes")
+            target_classes = [c.lower() for c in self.bed_classes]
+
+            if is_world_model and hasattr(model, "set_classes"):
+                try:
+                    model.set_classes(self.bed_classes)
+                except Exception:
+                    pass
+
             for frame in frames:
                 res = model(frame, conf=self.confidence_thresh, verbose=False, device=self.device)[0]
                 if res.boxes is not None and len(res.boxes) > 0:
                     for c, xyxy in zip(res.boxes.cls.cpu().numpy(), res.boxes.xyxy.cpu().numpy()):
-                        if model.names.get(int(c)) in ["bed", "couch"]:
+                        cls_name = str(model.names.get(int(c), "")).lower()
+                        if cls_name in target_classes or (not is_world_model and cls_name in ["bed", "couch"]):
                             boxes.append((float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])))
         except Exception:
             pass

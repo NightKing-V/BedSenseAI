@@ -1,5 +1,5 @@
 """
-Ollama Client for local Text and VLM inference (§5 of Design Spec).
+Ollama Client for local Text and VLM inference.
 """
 
 import json
@@ -42,23 +42,33 @@ class OllamaClient:
         self.llm_available = False
         self.vlm_available = False
 
-    def is_available(self) -> bool:
-        """Checks if the configured Ollama endpoint and models are reachable."""
+    def is_available(self, auto_pull: bool = True) -> bool:
+        """Checks if the configured Ollama endpoint is reachable and models are ready, auto-pulling missing models if needed."""
         try:
-            r = httpx.get(f"{self.base_url}/api/tags", timeout=3.0)
+            r = httpx.get(f"{self.base_url}/api/tags", timeout=5.0)
             if r.status_code == 200:
                 tags_data = r.json()
                 model_names = [m.get("name", "") for m in tags_data.get("models", [])]
 
                 # Check LLM text model
-                self.llm_available = any(self.text_model in name for name in model_names) if model_names else True
-                if not self.llm_available and model_names:
-                    logger.error(f"[ERROR] Ollama LLM text model '{self.text_model}' not found in available models: {model_names}")
+                self.llm_available = any(self.text_model in name for name in model_names)
+                if not self.llm_available:
+                    if auto_pull:
+                        logger.info(f"[START] Ollama LLM text model '{self.text_model}' not found in local cache. Automatically pulling from registry...")
+                        if self.pull_model(self.text_model):
+                            self.llm_available = True
+                    else:
+                        logger.error(f"[ERROR] Ollama LLM text model '{self.text_model}' not found in available models: {model_names}")
 
                 # Check VLM vision model
-                self.vlm_available = any(self.vlm_model in name for name in model_names) if model_names else True
-                if not self.vlm_available and model_names:
-                    logger.error(f"[ERROR] Ollama VLM vision model '{self.vlm_model}' not found in available models: {model_names}")
+                self.vlm_available = any(self.vlm_model in name for name in model_names)
+                if not self.vlm_available:
+                    if auto_pull:
+                        logger.info(f"[START] Ollama VLM model '{self.vlm_model}' not found in local cache. Automatically pulling from registry...")
+                        if self.pull_model(self.vlm_model):
+                            self.vlm_available = True
+                    else:
+                        logger.error(f"[ERROR] Ollama VLM vision model '{self.vlm_model}' not found in available models: {model_names}")
 
                 return True
             else:
@@ -66,6 +76,25 @@ class OllamaClient:
                 return False
         except Exception as e:
             logger.error(f"[ERROR] Failed to connect to Ollama service at {self.base_url}: {e}")
+            return False
+
+    def pull_model(self, model_name: str) -> bool:
+        """Pulls a model from the Ollama registry via the HTTP API."""
+        try:
+            logger.info(f"[START] Pulling model '{model_name}' from Ollama API ({self.base_url})...")
+            with httpx.Client(timeout=1800.0) as client:
+                resp = client.post(
+                    f"{self.base_url}/api/pull",
+                    json={"name": model_name, "stream": False},
+                )
+                if resp.status_code == 200:
+                    logger.info(f"[START] Model '{model_name}' successfully downloaded and loaded into Ollama.")
+                    return True
+                else:
+                    logger.error(f"[ERROR] Failed to pull model '{model_name}': HTTP {resp.status_code} - {resp.text}")
+                    return False
+        except Exception as e:
+            logger.error(f"[ERROR] Exception occurred while downloading model '{model_name}': {e}")
             return False
 
     def generate_json(self, prompt: str, system_prompt: str = "") -> Optional[Dict[str, Any]]:

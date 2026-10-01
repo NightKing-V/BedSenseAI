@@ -1,5 +1,5 @@
 """
-Clinical Report Generation & JSON Exporters for BedSense AI (§6.2 of Design Spec).
+Clinical Report Generation & JSON Exporters for BedSense AI.
 Builds summary.json, timeline.json, and events.json adhering to clinical specifications.
 """
 
@@ -22,7 +22,7 @@ logger = logging.getLogger("BedSensePolicy")
 
 
 def format_hms(seconds: Union[int, float]) -> str:
-    """Formats seconds into standard HH:MM:SS string (§6.2)."""
+    """Formats seconds into standard HH:MM:SS string."""
     sec = max(0, int(round(seconds)))
     h = sec // 3600
     m = (sec % 3600) // 60
@@ -32,7 +32,7 @@ def format_hms(seconds: Union[int, float]) -> str:
 
 class ReportGenerator:
     """
-    Generates timeline.json, events.json, summary.json, and telemetry.csv strictly adhering to §6.2.
+    Generates timeline.json, events.json, summary.json, and telemetry.csv.
     Ensures sum(activity_duration_sec) == observation_duration_sec.
     """
 
@@ -78,7 +78,7 @@ class ReportGenerator:
 
         longest_out_period = max(longest_out_period, current_out_period)
 
-        # Ensure exact integer sum conservation rule (§6.2)
+        # Ensure exact integer sum conservation rule
         diff = obs_sec_int - sum(activity_map.values())
         if diff != 0:
             dominant_key = max(activity_map, key=activity_map.get)
@@ -86,19 +86,17 @@ class ReportGenerator:
 
         bed_exits = sum(1 for e in events if e.event == EVENT_BED_EXIT)
         bed_returns = sum(1 for e in events if e.event == EVENT_BED_RETURN)
-        missing_count = sum(1 for e in events if e.event == EVENT_MISSING)
         final_state = segments[-1].state.lower() if segments else "unknown"
 
         return {
             "observation_duration_sec": obs_sec_int,
+            "activity_duration_sec": activity_map,
             "bed_exit_count": bed_exits,
             "bed_return_count": bed_returns,
-            "missing_count": missing_count,
             "total_in_bed_sec": int(round(total_in_bed)),
             "total_out_of_bed_sec": int(round(total_out_bed)),
             "longest_out_of_bed_period_sec": int(round(longest_out_period)),
             "final_state": final_state,
-            "activity_duration_sec": activity_map,
         }
 
     @staticmethod
@@ -139,6 +137,7 @@ class ReportGenerator:
         output_dir: Union[str, Path],
         total_obs_sec: float,
         telemetry_records: Optional[List[Dict[str, Any]]] = None,
+        save_json: bool = True,
         segments_heuristic: Optional[List[StateSegment]] = None,
         events_heuristic: Optional[List[BedEvent]] = None,
         segments_evidence: Optional[List[StateSegment]] = None,
@@ -151,54 +150,55 @@ class ReportGenerator:
         out_path = Path(output_dir)
         out_path.mkdir(parents=True, exist_ok=True)
 
-        # Primary timeline and summary (Method 2 by default)
-        timeline_data = [s.to_dict() for s in segments]
-        with open(out_path / "timeline.json", "w", encoding="utf-8") as f:
-            json.dump(timeline_data, f, indent=2)
+        if save_json:
+            # Primary timeline and summary (Method 2 by default)
+            timeline_data = [s.to_dict() for s in segments]
+            with open(out_path / "timeline.json", "w", encoding="utf-8") as f:
+                json.dump(timeline_data, f, indent=2)
 
-        events_data = [e.to_events_json_entry() for e in events]
-        with open(out_path / "events.json", "w", encoding="utf-8") as f:
-            json.dump(events_data, f, indent=2)
+            events_data = [e.to_events_json_entry() for e in events]
+            with open(out_path / "events.json", "w", encoding="utf-8") as f:
+                json.dump(events_data, f, indent=2)
 
-        summary_data = ReportGenerator.build_summary(segments, events, total_obs_sec)
-        with open(out_path / "summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary_data, f, indent=2)
+            summary_data = ReportGenerator.build_summary(segments, events, total_obs_sec)
+            with open(out_path / "summary.json", "w", encoding="utf-8") as f:
+                json.dump(summary_data, f, indent=2)
 
-        # If running in dual comparison mode
-        if segments_heuristic is not None and segments_evidence is not None:
-            heur_timeline = [s.to_dict() for s in segments_heuristic]
-            with open(out_path / "timeline_heuristic.json", "w", encoding="utf-8") as f:
-                json.dump(heur_timeline, f, indent=2)
+            # If running in dual comparison mode
+            if segments_heuristic is not None and segments_evidence is not None:
+                heur_timeline = [s.to_dict() for s in segments_heuristic]
+                with open(out_path / "timeline_heuristic.json", "w", encoding="utf-8") as f:
+                    json.dump(heur_timeline, f, indent=2)
 
-            evid_timeline = [s.to_dict() for s in segments_evidence]
-            with open(out_path / "timeline_evidence.json", "w", encoding="utf-8") as f:
-                json.dump(evid_timeline, f, indent=2)
+                evid_timeline = [s.to_dict() for s in segments_evidence]
+                with open(out_path / "timeline_evidence.json", "w", encoding="utf-8") as f:
+                    json.dump(evid_timeline, f, indent=2)
 
-            heur_events = events_heuristic or []
-            with open(out_path / "events_heuristic.json", "w", encoding="utf-8") as f:
-                json.dump([e.to_events_json_entry() for e in heur_events], f, indent=2)
+                heur_events = events_heuristic or []
+                with open(out_path / "events_heuristic.json", "w", encoding="utf-8") as f:
+                    json.dump([e.to_events_json_entry() for e in heur_events], f, indent=2)
 
-            evid_events = events_evidence or []
-            with open(out_path / "events_evidence.json", "w", encoding="utf-8") as f:
-                json.dump([e.to_events_json_entry() for e in evid_events], f, indent=2)
+                evid_events = events_evidence or []
+                with open(out_path / "events_evidence.json", "w", encoding="utf-8") as f:
+                    json.dump([e.to_events_json_entry() for e in evid_events], f, indent=2)
 
-            heur_summary = ReportGenerator.build_summary(segments_heuristic, heur_events, total_obs_sec)
-            with open(out_path / "summary_heuristic.json", "w", encoding="utf-8") as f:
-                json.dump(heur_summary, f, indent=2)
+                heur_summary = ReportGenerator.build_summary(segments_heuristic, heur_events, total_obs_sec)
+                with open(out_path / "summary_heuristic.json", "w", encoding="utf-8") as f:
+                    json.dump(heur_summary, f, indent=2)
 
-            evid_summary = ReportGenerator.build_summary(segments_evidence, evid_events, total_obs_sec)
-            with open(out_path / "summary_evidence.json", "w", encoding="utf-8") as f:
-                json.dump(evid_summary, f, indent=2)
+                evid_summary = ReportGenerator.build_summary(segments_evidence, evid_events, total_obs_sec)
+                with open(out_path / "summary_evidence.json", "w", encoding="utf-8") as f:
+                    json.dump(evid_summary, f, indent=2)
 
-            comparison_summary = {
-                "observation_duration_sec": int(round(total_obs_sec)),
-                "method_1_heuristic": heur_summary,
-                "method_2_evidence": evid_summary,
-            }
-            with open(out_path / "summary_comparison.json", "w", encoding="utf-8") as f:
-                json.dump(comparison_summary, f, indent=2)
+                comparison_summary = {
+                    "observation_duration_sec": int(round(total_obs_sec)),
+                    "method_1_heuristic": heur_summary,
+                    "method_2_evidence": evid_summary,
+                }
+                with open(out_path / "summary_comparison.json", "w", encoding="utf-8") as f:
+                    json.dump(comparison_summary, f, indent=2)
 
-        if telemetry_records is not None:
+        if telemetry_records is not None and len(telemetry_records) > 0:
             ReportGenerator.export_csv(telemetry_records, output_dir, filename="telemetry.csv")
 
 

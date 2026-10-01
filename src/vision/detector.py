@@ -1,5 +1,5 @@
 """
-Primary Vision Detector & Resident Tracking Engine for BedSense AI (§3.1 of Design Spec).
+Primary Vision Detector & Resident Tracking Engine for BedSense AI.
 """
 
 from pathlib import Path
@@ -9,6 +9,7 @@ from ultralytics import YOLO
 
 from ..contracts import FrameObservation
 from .bed_engine import BedRelationEngine
+from .model_utils import resolve_model_path
 
 
 class PerceptionDetector:
@@ -20,7 +21,7 @@ class PerceptionDetector:
 
     def __init__(
         self,
-        model_path: Union[str, YOLO] = "yolo11n-pose.pt",
+        model_path: Union[str, YOLO] = "models/yolo11n-pose.pt",
         conf_threshold: float = 0.25,
         tracker_config: str = "bytetrack.yaml",
         device: str = "cuda:0",
@@ -28,7 +29,8 @@ class PerceptionDetector:
         max_reacquire_dist: float = 180.0,
     ):
         if isinstance(model_path, str):
-            self.model = YOLO(model_path)
+            resolved_path = resolve_model_path(model_path)
+            self.model = YOLO(resolved_path)
         else:
             self.model = model_path
 

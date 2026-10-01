@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import cv2
 import numpy as np
 
-from .constants import STATE_COLORS
+from .constants import EVENT_MISSING, STATE_COLORS
 from .contracts import BedEvent, FrameObservation, StateSegment
 from .policy import ReportGenerator, format_hms
 
@@ -150,7 +150,7 @@ class VideoAnnotator:
         for f in frames:
             writer.write(f)
         writer.release()
-        logger.info(f"Annotated video saved successfully: {out_file.resolve()}")
+        logger.export(f"Annotated video saved successfully: '{out_file.resolve()}' ({len(frames)} frames @ {fps:.1f} FPS, {w}x{h})")
 
 
 class ArtifactExporter:
@@ -162,34 +162,40 @@ class ArtifactExporter:
         segments: List[StateSegment],
         events: List[BedEvent],
         obs_duration: float,
-        telemetry_records: List[Dict[str, Any]],
+        telemetry_records: Optional[List[Dict[str, Any]]] = None,
         frames: Optional[List[np.ndarray]] = None,
         video_name: str = "annotated.mp4",
         fps: float = 10.0,
+        save_video: bool = True,
+        save_json: bool = True,
+        save_telemetry: bool = False,
     ):
         """Exports primary pipeline artifacts (Method 2 Evidence-Based Engine by default)."""
         out_path = Path(output_dir)
         out_path.mkdir(parents=True, exist_ok=True)
+
+        logger.export(f"Exporting clinical monitoring artifacts to '{out_path.resolve()}'...")
 
         ReportGenerator.export(
             segments=segments,
             events=events,
             output_dir=out_path,
             total_obs_sec=obs_duration,
-            telemetry_records=telemetry_records,
+            telemetry_records=telemetry_records if save_telemetry else None,
+            save_json=save_json,
         )
 
-        if frames:
+        if save_video and frames:
             VideoAnnotator.save_video(frames, out_path / video_name, fps=fps)
 
-        logger.info(
-            f"Primary pipeline artifacts exported successfully to '{out_path}/':\n"
-            f"  • timeline.json ({len(segments)} segments)\n"
-            f"  • events.json ({len(events)} events)\n"
-            f"  • summary.json\n"
-            f"  • telemetry.csv ({len(telemetry_records)} frames)\n"
-            f"  • {video_name}"
-        )
+        if save_json:
+            logger.export(f"  ✓ timeline.json ({len(segments)} segments, {format_hms(obs_duration)} total observation)")
+            logger.export(f"  ✓ events.json ({len(events)} clinical events)")
+            logger.export(f"  ✓ summary.json (clinical duration metrics & incident totals)")
+        if save_telemetry and telemetry_records is not None and len(telemetry_records) > 0:
+            logger.export(f"  ✓ telemetry.csv ({len(telemetry_records)} frame records)")
+        if save_video and frames:
+            logger.export(f"  ✓ {video_name} ({len(frames)} frames @ {fps:.1f} FPS)")
 
     @staticmethod
     def export_all(
@@ -199,14 +205,19 @@ class ArtifactExporter:
         segments_m2: List[StateSegment],
         events_m2: List[BedEvent],
         obs_duration: float,
-        telemetry_records: List[Dict[str, Any]],
+        telemetry_records: Optional[List[Dict[str, Any]]] = None,
         frames_m1: Optional[List[np.ndarray]] = None,
         frames_m2: Optional[List[np.ndarray]] = None,
         fps: float = 10.0,
+        save_video: bool = True,
+        save_json: bool = True,
+        save_telemetry: bool = False,
     ):
         """Exports side-by-side comparison artifacts for Method 1 and Method 2."""
         out_path = Path(output_dir)
         out_path.mkdir(parents=True, exist_ok=True)
+
+        logger.export(f"Exporting dual comparison artifacts to '{out_path.resolve()}'...")
 
         # Primary timeline and summary default to Method 2 (Evidence)
         ReportGenerator.export(
@@ -214,7 +225,8 @@ class ArtifactExporter:
             events=events_m2,
             output_dir=out_path,
             total_obs_sec=obs_duration,
-            telemetry_records=telemetry_records,
+            telemetry_records=telemetry_records if save_telemetry else None,
+            save_json=save_json,
             segments_heuristic=segments_m1,
             events_heuristic=events_m1,
             segments_evidence=segments_m2,
@@ -222,20 +234,22 @@ class ArtifactExporter:
         )
 
         # Encode and save annotated videos
-        if frames_m1:
-            VideoAnnotator.save_video(frames_m1, out_path / "annotated_heuristic.mp4", fps=fps)
-        if frames_m2:
-            VideoAnnotator.save_video(frames_m2, out_path / "annotated_evidence.mp4", fps=fps)
-            VideoAnnotator.save_video(frames_m2, out_path / "annotated.mp4", fps=fps)
+        if save_video:
+            if frames_m1:
+                VideoAnnotator.save_video(frames_m1, out_path / "annotated_heuristic.mp4", fps=fps)
+            if frames_m2:
+                VideoAnnotator.save_video(frames_m2, out_path / "annotated_evidence.mp4", fps=fps)
+                VideoAnnotator.save_video(frames_m2, out_path / "annotated.mp4", fps=fps)
 
-        logger.info(
-            f"Dual comparison artifacts exported successfully to '{out_path}/':\n"
-            f"  • timeline.json (Primary: Method 2)\n"
-            f"  • timeline_heuristic.json & timeline_evidence.json\n"
-            f"  • summary.json & summary_comparison.json\n"
-            f"  • telemetry.csv ({len(telemetry_records)} rows)\n"
-            f"  • annotated_heuristic.mp4 & annotated_evidence.mp4"
-        )
+        if save_json:
+            logger.export(f"  ✓ timeline.json (Primary: Method 2, {len(segments_m2)} segments)")
+            logger.export(f"  ✓ timeline_heuristic.json ({len(segments_m1)} segments) & timeline_evidence.json ({len(segments_m2)} segments)")
+            logger.export(f"  ✓ events.json & events_heuristic.json ({len(events_m2)} events)")
+            logger.export(f"  ✓ summary.json & summary_comparison.json")
+        if save_telemetry and telemetry_records is not None and len(telemetry_records) > 0:
+            logger.export(f"  ✓ telemetry.csv ({len(telemetry_records)} rows)")
+        if save_video and (frames_m1 or frames_m2):
+            logger.export("  ✓ annotated_heuristic.mp4 & annotated_evidence.mp4")
 
     @staticmethod
     def print_terminal_summary(
@@ -255,13 +269,15 @@ class ArtifactExporter:
         RESET = "\033[0m"
 
         print("\n" + f"{CYAN}{BOLD}╔══════════════════════════════════════════════════════════════════════════════════════╗{RESET}")
-        print(f"{CYAN}{BOLD}║         BEDSENSE AI CLINICAL STATE & MONITORING REPORT                               ║{RESET}")
+        print(f"{CYAN}{BOLD}║                            BEDSENSE AI MONITORING SUMMARY                            ║{RESET}")
         print(f"{CYAN}{BOLD}╠══════════════════════════════════════════════════════════════════════════════════════╣{RESET}")
+        missing_alerts = sum(1 for e in events if e.event == EVENT_MISSING)
         print(f"Active Engine:             {GREEN}{method_name}{RESET}")
         print(f"Observation Duration:      {format_hms(obs_duration)} ({obs_duration:.1f}s)")
         print(f"Total Segments:            {len(segments)} | Final State: {summary['final_state'].upper()}")
-        print(f"Bed Exits / Returns:       {summary['bed_exit_count']} exits / {summary['bed_return_count']} returns | Missing Alerts: {summary['missing_count']}")
+        print(f"Bed Exits / Returns:       {summary['bed_exit_count']} exits / {summary['bed_return_count']} returns | Missing Alerts: {missing_alerts}")
         print(f"Time In Bed / Out Of Bed:  {format_hms(summary['total_in_bed_sec'])} ({summary['total_in_bed_sec']}s) / {format_hms(summary['total_out_of_bed_sec'])} ({summary['total_out_of_bed_sec']}s)")
+        print(f"Longest Out Of Bed Period: {format_hms(summary['longest_out_of_bed_period_sec'])} ({summary['longest_out_of_bed_period_sec']}s)")
         print(f"{CYAN}{BOLD}╠══════════════════════════════════════════════════════════════════════════════════════╣{RESET}")
         print(f"{'Activity State':<28} | {'Duration (HH:MM:SS)':<22} | {'Percentage':<12}")
         print("-" * 70)

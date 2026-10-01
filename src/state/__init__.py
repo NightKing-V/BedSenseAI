@@ -1,5 +1,5 @@
 """
-State Machine & Pattern Matcher Subsystem for BedSense AI (§4.2 of Design Spec).
+State Machine & Pattern Matcher Subsystem for BedSense AI.
 """
 
 from ..policy import PolicyEngine, ReportGenerator, evaluate_ambiguity, format_hms

@@ -1,5 +1,5 @@
 """
-LangGraph StateGraph Workflow for BedSense AI Agentic Reasoning (§5 of Design Spec).
+LangGraph StateGraph Workflow for BedSense AI Agentic Reasoning.
 """
 
 import json
@@ -188,7 +188,7 @@ class LangGraphAgentWorkflow:
         }
 
     def _tools_node(self, state: AgentGraphState) -> Dict[str, Any]:
-        """Executes requested tool and records trace for auditability (§2 BedEvent contract)."""
+        """Executes requested tool and records trace for auditability."""
         tool_call = state.get("next_tool_call") or {}
         tool_name = tool_call.get("tool", "")
         args = tool_call.get("args")

@@ -3,8 +3,9 @@
 # ==============================================================================
 
 perception:
-  detector_model: "yolo11n.pt" # YOLO object detection model for bed/furniture auto-calibration
-  pose_model: "yolo11l-pose.pt" # Ultralytics pose model (17 COCO keypoints)
+  detector_model: "models/yolo11n.pt" # YOLO-World / standard YOLO object detection model for bed auto-calibration
+  bed_classes: ["hospital bed", "bed", "mattress", "couch"] # Open-vocabulary text prompts for bed detection
+  pose_model: "models/yolo11l-pose.pt" # Ultralytics pose model (17 COCO keypoints)
   pose_conf: 0.20 # Minimum confidence to detect person/pose
   bed_conf: 0.12 # Minimum confidence to detect bed/furniture bounding box
   tracker_config: "bytetrack.yaml" # Built-in ByteTrack multi-object tracker
@@ -33,7 +34,10 @@ evidence:
 
 temporal:
   # Real-time streaming temporal engine & state machine rules
-  min_segment_sec: 0.5 # Minimum duration a state must be held to confirm transition (fast in-bed handoff)
+  min_segment_sec: 0.5 # Default minimum segment duration
+  unknown_exit_sec: 0.20 # Ultra-fast 200ms confirmation when re-detecting resident from UNKNOWN
+  unknown_enter_sec: 0.35 # Blip-resistant 350ms confirmation before committing UNKNOWN
+  intra_bed_switch_sec: 0.30 # Fast 300ms confirmation for lying <-> sitting on bed
   min_exit_confirm_sec: 3.0 # Sustained walking/out_of_bed duration required to confirm clinical bed exit
   return_window_sec: 10.0 # Max time window to complete return transition to bed
   context_window_sec: 5.0 # Surrounding context history window [t - 5s, t + 5s] provided to Agent LLM
@@ -45,6 +49,7 @@ confidence:
 
 agent:
   # Agent LLM & VLM settings via Ollama
+  enabled: true # Enable LangGraph Agent reasoning layer for clinical events & ambiguity
   ollama_base_url: "http://ollama:11434" # Ollama server endpoint in Docker network
   text_model: "qwen2.5:3b" # Text reasoning agent model (e.g. qwen2.5:3b, qwen3:4b)
   vlm_model: "qwen2.5vl:3b" # Vision language model for vlm_describe tool
@@ -57,13 +62,19 @@ policy:
   edge_sit_monitor_sec: 10.0 # Sitting on bed edge > 10s -> MONITOR
   unknown_monitor_sec: 10.0 # Sustained UNKNOWN > 10s -> MONITOR
   out_of_bed_alert_sec: 10.0 # Prolonged absence from bed > 10s -> ALERT
-  caregiver_suppress_escalation: true # Presence of caregiver track lowers alert escalation by one level
+
+artifacts:
+  # Artifact export & recording settings
+  save_video: false # Render and export annotated visualization MP4 video
+  save_json: true # Export clinical reports (timeline.json, events.json, summary.json)
+  save_telemetry: false # Record and export frame-by-frame telemetry.csv (disabled by default for speed & memory)
 
 logging:
   # Logging verbosity level configuration
   # Options:
-  #   - PROD   : Production mode — State transitions & clinical alerts (bed_exit, missing, bed_return) + final reports only
-  #   - INFO   : Operational mode — Adds video ingestion progress (FPS/timestamp) & export logs
+  #   - PROD   : Production mode (Default) — Full production lifecycle: starting, calibration, progress steps, state transitions, alerts, artifact export & completion
+  #   - INFO   : Operational mode — Equivalent to PROD
   #   - AGENT  : Agent debug mode — Adds LangGraph reasoning loops, LLM structured prompts/responses & tool traces
   #   - DEBUG  : Full telemetry mode — Adds per-frame keypoint confidences & raw polygon overlap ratios
+  #   - STATE  : State-only mode — Shows only live state transitions and clinical alert boxes
   default_level: "PROD"

@@ -1,5 +1,5 @@
 """
-State Machine Sequence Pattern Matcher for BedSense AI (§4.2 of Design Spec).
+State Machine Sequence Pattern Matcher for BedSense AI.
 Identifies bed-exit and bed-return sequences across smoothed timeline segments.
 """
 
@@ -35,7 +35,7 @@ class CandidateEvent:
 
 
 class BedPatternMatcher:
-    """State machine identifying bed-exit, missing, and bed-return sequence patterns (§4.2)."""
+    """State machine identifying bed-exit, missing, and bed-return sequence patterns."""
 
     def __init__(
         self,

@@ -1,5 +1,5 @@
 """
-Agent Tool Suite for LangGraph Agentic Reasoning (§5.3 of Design Spec).
+Agent Tool Suite for LangGraph Agentic Reasoning.
 """
 
 import base64
@@ -55,7 +55,7 @@ class AgentToolSuite:
         video_path: Optional[str],
         ollama_client: OllamaClient,
     ) -> Dict[str, Any]:
-        """Samples 3-5 frames from [t0, t1] and queries Qwen-VL with strict JSON output (§5.4)."""
+        """Samples 3-5 frames from [t0, t1] and queries Qwen-VL with strict JSON output."""
         if not video_path or not Path(video_path).exists():
             logger.agent(f"[Tool: vlm_describe] Video path '{video_path}' unavailable for frame sampling.")
             return {

@@ -1,5 +1,5 @@
 """
-Real-Time Online Streaming Processor for BedSense AI (§3, §4, §5, §6 of Design Spec).
+Real-Time Online Streaming Processor for BedSense AI.
 Processes live video/camera frames on-the-fly, updates temporal state segments in real-time,
 triggers LangGraph agent reasoning immediately upon ambiguous transitions, and emits live clinical alerts.
 """
@@ -55,8 +55,11 @@ class StreamingProcessor:
 
     def __init__(
         self,
-        min_segment_sec: float = 1.0,
+        min_segment_sec: float = 0.5,
         context_window_sec: float = 5.0,
+        unknown_exit_sec: float = 0.20,
+        unknown_enter_sec: float = 0.35,
+        intra_bed_switch_sec: float = 0.30,
         pattern_matcher: Optional[BedPatternMatcher] = None,
         policy_engine: Optional[PolicyEngine] = None,
         agent_workflow: Optional[LangGraphAgentWorkflow] = None,
@@ -65,6 +68,9 @@ class StreamingProcessor:
     ):
         self.min_segment_sec = min_segment_sec
         self.context_window_sec = context_window_sec
+        self.unknown_exit_sec = unknown_exit_sec
+        self.unknown_enter_sec = unknown_enter_sec
+        self.intra_bed_switch_sec = intra_bed_switch_sec
         self.pattern_matcher = pattern_matcher or BedPatternMatcher()
         self.policy_engine = policy_engine or PolicyEngine()
         self.agent_workflow = agent_workflow
@@ -126,9 +132,14 @@ class StreamingProcessor:
 
         # 3. Candidate State Transition
         else:
-            # Determine threshold: intra-bed switches (lying <-> sitting on bed) use fast 0.35s confirmation
-            if self.active_state in in_bed_states and state in in_bed_states:
-                required_duration = min(0.35, self.min_segment_sec)
+            # Dynamic state transition latency:
+            # - Re-detecting person from UNKNOWN -> ANY physical state: ultra-fast (unknown_exit_sec = 0.20s / 2 frames)
+            # - Intra-bed handoff (lying <-> sitting on bed): fast (intra_bed_switch_sec = 0.30s)
+            # - Blip-resistant standard transitions: self.min_segment_sec
+            if self.active_state == STATE_UNKNOWN:
+                required_duration = self.unknown_exit_sec
+            elif self.active_state in in_bed_states and state in in_bed_states:
+                required_duration = min(self.intra_bed_switch_sec, self.min_segment_sec)
             else:
                 required_duration = self.min_segment_sec
 
@@ -149,7 +160,7 @@ class StreamingProcessor:
                     self.pending_state = state
                 self.pending_confs.append(conf)
 
-                # Check if pending state has persisted long enough to confirm a valid transition (§3)
+                # Check if pending state has persisted long enough to confirm a valid transition
                 if (t - self.pending_start_t) >= required_duration:
                     self._commit_transition(t)
 
@@ -208,7 +219,7 @@ class StreamingProcessor:
                 working_segments[-1]
             )
 
-            # Evaluate ambiguity on-the-fly (§4.1)
+            # Evaluate ambiguity on-the-fly
             seg_obs = [o for o in self.observations if matching_seg.start_t <= o.t <= matching_seg.end_t]
             is_amb, amb_conf, amb_reason = evaluate_ambiguity(matching_seg, seg_obs, [cand])
             if is_amb:
@@ -362,7 +373,7 @@ class StreamingProcessor:
                     )
                 )
 
-        # Ensure exact timeline continuity (§2 & §3)
+        # Ensure exact timeline continuity
         for k in range(len(self.finalized_segments) - 1):
             self.finalized_segments[k].end_t = self.finalized_segments[k + 1].start_t
 

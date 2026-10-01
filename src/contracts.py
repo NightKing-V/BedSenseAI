@@ -1,5 +1,5 @@
 """
-Data contracts for BedSense AI Monitoring System (§2 of Design Spec).
+Data contracts for BedSense AI Monitoring System.
 """
 
 from dataclasses import dataclass, field
@@ -9,7 +9,7 @@ import numpy as np
 
 @dataclass
 class FrameObservation:
-    """Primary Vision -> Temporal Engine contract (§2)."""
+    """Primary Vision -> Temporal Engine observation schema."""
     t: float
     track_id: Optional[int]
     bbox: Optional[Tuple[float, float, float, float]]
@@ -29,7 +29,7 @@ class FrameObservation:
 
 @dataclass
 class StateSegment:
-    """Temporal Engine -> Router / Agent LLM contract (§2)."""
+    """Temporal Engine -> Router / Agent reasoning schema."""
     start_t: float
     end_t: float
     state: str
@@ -53,7 +53,7 @@ class StateSegment:
 
 @dataclass
 class BedEvent:
-    """Agent / Policy -> Output contract (§2 & §6.2)."""
+    """Agent / Policy -> Output event schema."""
     event: str                  # "bed_exit" | "bed_return"
     start_time: str             # "HH:MM:SS"
     confirmed_time: str         # "HH:MM:SS"
@@ -64,7 +64,7 @@ class BedEvent:
     tool_trace: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_events_json_entry(self) -> Dict[str, Any]:
-        """Strict schema matching §6.2."""
+        """Converts to standardized clinical event dictionary."""
         return {
             "event": self.event,
             "start_time": self.start_time,

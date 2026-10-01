@@ -1,238 +1,443 @@
-# BedSense AI — Elderly Bed-Monitoring & Agentic Kinematics System
+# BedSense AI — Clinical Bed-Monitoring Agentic AI + Vision System
 
-BedSense AI is an intelligent computer vision and agentic reasoning system designed for continuous monitoring of elderly patients around hospital and home-care beds. It determines posture activity states, detects bed-exit and bed-return events, tracks durations, and assigns clinical monitoring decisions (`NORMAL` / `MONITOR` / `ALERT`).
+BedSense AI is an intelligent computer vision and agentic reasoning system designed for continuous monitoring of elderly residents around hospital and care beds. It tracks canonical postural states, accurately detects bed-exit, bed-return, and missing-resident events, and assigns clinical monitoring decisions (`NORMAL` / `MONITOR` / `ALERT`).
 
 ---
 
-## 1. Architecture Overview
+## 1. System Architecture
 
 ```mermaid
 flowchart TD
-    V[VIDEO STREAM] --> PV
+    V["Video Stream / Camera Input"] --> P1
 
-    subgraph PV["Primary Vision Layer"]
-        direction TB
-        PV1[Single YOLO-Pose Model]
-        PV2[ByteTrack Multi-Object Tracking]
-        PV3[17 COCO Keypoints Extraction]
-        PV4[Dynamic Bed Detection & Overlap Calculation]
+    subgraph L1["Layer 1: Perception & Auto-Calibration"]
+        P1["YOLO-World Bed Auto-Calibration<br/>(Open-Vocabulary Furniture Prompts)"]
+        P2["YOLO-Pose Multi-Person Tracker<br/>(17 COCO Keypoints + ByteTrack)"]
+        P1 --> P2
     end
 
-    PV --> TSE
+    P2 --> L2
 
-    subgraph TSE["Temporal State Engine"]
-        direction TB
-        TSE1[Posture Geometry Classification]
-        TSE2[Transition Smoothing >= 2.0s]
-        TSE3[Duration & History Buffering]
-        TSE4["Bed-Exit / Return Pattern Matcher"]
+    subgraph L2["Layer 2: Biomechanical Evidence Engine"]
+        E1["Planar Joint Kinematics<br/>(Hip & Knee Flexion Angles)"]
+        E2["Torso Scale & Velocity Vectors<br/>(Trunk Aspect Ratio + Motion)"]
+        E3["Continuous Bed Affinity<br/>(Multi-Joint Mattress Contact)"]
+        E4["Additive Evidence Accumulator<br/>(Probabilistic State Weights)"]
+        E1 --> E4
+        E2 --> E4
+        E3 --> E4
     end
 
-    TSE --> ROUTE{Confidence Router}
-    ROUTE -->|"High Confidence (Clear pattern match)"| POLICY
-    ROUTE -->|"Low Confidence / Ambiguous (§4.1 Triggers)"| AGENT
+    E4 --> L3
 
-    subgraph AGENT["Agent LLM (Qwen via Ollama)"]
-        A1["Inspect Ambiguous Segment + Context [t-30s, t+30s]"]
-        A2["Decide: Need more evidence?"]
+    subgraph L3["Layer 3: Streaming State Machine"]
+        S1["Dynamic Asymmetric Smoothing<br/>(200ms Unknown Exit / 300ms Intra-Bed)"]
+        S2["Transient Blip Absorption (500ms)"]
+        S3["State Sequence Pattern Matcher<br/>(Bed-Exit / Bed-Return / Missing)"]
+        S1 --> S2
+        S2 --> S3
     end
 
-    AGENT -->|Decision Resolved| POLICY
-    AGENT -->|Call Tool (Cap = 4)| TOOLS
+    S3 --> ROUTE{"Ambiguity Router"}
+    ROUTE -->|"High Confidence"| POL
+    ROUTE -->|"Ambiguous Transition"| A1
 
-    subgraph TOOLS["Agent Tool Suite"]
-        direction TB
-        T1["get_segment(t0, t1)"]
-        T2["check_bed_overlap(t)"]
-        T3["vlm_describe(t0, t1, question) - Qwen-VL"]
+    subgraph L4["Layer 4: LangGraph Agent & VLM Reasoning"]
+        A1["LangGraph Reasoning Node<br/>(Qwen2.5:3b via Ollama)"]
+        A2["Tool Suite<br/>(get_segment, check_bed_overlap)"]
+        A3["VLM Visual Inspection Tool<br/>(Qwen2.5-VL:3b Tool Calling)"]
+        A1 --> A2
+        A2 --> A1
+        A1 --> A3
+        A3 --> A1
     end
 
-    TOOLS --> AGENT
+    A1 --> POL
 
-    subgraph POLICY["Clinical Policy Engine"]
-        direction TB
-        P1[NORMAL]
-        P2[MONITOR]
-        P3[ALERT]
-        P4[Caregiver Escalation Suppression]
+    subgraph L5["Layer 5: Clinical Policy & Artifact Exporters"]
+        POL["Clinical Policy Engine<br/>(NORMAL / MONITOR / ALERT)"]
+        EXP["Configurable Artifact Exporter<br/>(Selective Video, JSON Reports, Telemetry CSV)"]
+        POL --> EXP
     end
 
-    POLICY --> OUT["Outputs (timeline.json / events.json / summary.json)"]
+    EXP --> OUT1["Annotated MP4 (annotated.mp4)"]
+    EXP --> OUT2["Clinical JSONs (timeline.json, events.json, summary.json)"]
+    EXP --> OUT3["Frame Telemetry CSV (telemetry.csv)"]
+```
+
+### High-Level Component Pipeline
+
+```
+[ Video Ingestion (10 FPS) ]
+            │
+            ▼
+[ Perception: YOLO-World Bed Quad + YOLO-Pose (17 Keypoints) + ByteTrack ]
+            │
+            ▼
+[ Evidence Accumulator: Knee/Hip Flexion + Torso Ratio + Mattress Affinity ]
+            │
+            ▼
+[ Streaming State Engine: 200ms Re-acquisition + 500ms Blip Suppression ]
+            │
+            ├── (High Confidence) ──────────────┐
+            ▼                                    ▼
+[ LangGraph Agent + Qwen2.5-VL ] ──► [ Clinical Policy Engine (NORMAL/MONITOR/ALERT) ]
+                                                 │
+                                                 ▼
+                             [ Exporter: Video MP4 + JSON Reports + Telemetry CSV ]
 ```
 
 ---
 
-## 2. Why the Confidence Router is Explicit
+## 2. The 6 Canonical Activity States
 
-Not every frame or transition requires an expensive LLM call:
-- **Unambiguous cases** (e.g. `LYING_IN_BED` $\to$ `SITTING_ON_BED` $\to$ `STANDING` $\to$ `WALKING` $\to$ `OUT_OF_BED`, with high keypoint confidence and sustained durations) resolve straight from the **Temporal State Engine's pattern matcher** with **no LLM call**.
-- **Ambiguous cases** (low keypoint confidence $<0.4$, bed boundary hovering $0.4-0.6$, horizontal posture detected off-bed, or temporary track ID loss) route to the **Agent LLM** with surrounding context $[t - 30\text{s}, t + 30\text{s}]$.
-
-This architecture bounds latency, reduces computational cost, and provides a clear, explainable audit trail (`tool_trace`) for clinical reviews.
-
----
-
-## 3. Dynamic Bed Detection & Overlap Calculation
-
-Rather than assuming rigid, fixed bed coordinates:
-1. **Dynamic Scene Detection**: The `BedRelationEngine` runs object detection (`bed` and `couch` classes via YOLO) on initial video frames to calculate the median bounding box and boundary polygon.
-2. **Pose Kinematic Calibration**: For scenes without clear object detections, the engine calculates the spatial bounding polygon from horizontal resting keypoint distributions.
-3. **Continuous Overlap Ratio**: Computes continuous geometric intersection area:
-   $$\text{overlap} = 0.55 \times \frac{\text{Area}(\text{Person} \cap \text{Bed})}{\text{Area}(\text{Person})} + 0.45 \times \text{Keypoint\_Containment\_Ratio}$$
+| State | Kinematic & Bed Relation Criteria |
+| :--- | :--- |
+| `LYING_IN_BED` | Reclined/horizontal posture ($\theta_{\text{hip}} \ge 155^\circ$, $\theta_{\text{knee}} \ge 150^\circ$), low displacement motion, high bed affinity ($\ge 0.25$). |
+| `SITTING_ON_BED` | Seated posture with flexed hips ($\theta_{\text{hip}} < 130^\circ$) or knees ($\theta_{\text{knee}} < 130^\circ$), compact trunk bounding box ($H \le 350\text{px}$), and bed affinity $\ge 0.25$. |
+| `SITTING_OUTSIDE_BED` | Seated upright posture with flexed joints located outside the bed perimeter (affinity $< 0.12$). |
+| `STANDING` | Upright vertical posture with extended hips/knees and stationary displacement velocity ($< 0.015$). |
+| `WALKING` | Upright vertical posture with locomotion motion profile ($v_{\text{ankle}} \ge 0.035$ or $v_{\text{center}} \ge 0.035$). |
+| `UNKNOWN` | Keypoint occlusion/absence, mean keypoint confidence $< 0.25$, or resident not in field of view. |
 
 ---
 
-## 4. The 7 Canonical Activity States
+## 3. Clinical Alert Rules & Policy
 
-| State | Posture × Bed Relation Criteria |
-| --- | --- |
-| `LYING_IN_BED` | Torso horizontal ($>50^\circ$ from vertical) and bed overlap $\ge 0.35$ |
-| `SITTING_ON_BED` | Torso upright/intermediate, bent knees, and bed overlap $\ge 0.35$ |
-| `SITTING_OUTSIDE_BED` | Torso upright, seated in chair/furniture, bed overlap $< 0.10$ |
-| `STANDING` | Upright vertical posture, low displacement velocity ($<25$ px/s) |
-| `WALKING` | Upright vertical posture, high displacement velocity ($\ge 25$ px/s) |
-| `OUT_OF_BED` | Patient detected outside bed zone or horizontal on floor |
-| `UNKNOWN` | Low keypoint confidence ($<0.25$) or contradictory geometric signals |
-
-**Smoothing Rule**: A state only forms a segment if held for $\ge 2.0\text{s}$ (`MIN_SEGMENT_SEC`). Shorter blips are collapsed into neighboring states to eliminate visual noise.
+| Event / Condition | Clinical Decision | Clinical Rationale |
+| :--- | :---: | :--- |
+| **Normal In-Bed / Locomotion** | `NORMAL` | Baseline patient activity within bed or stable room environment. |
+| **Bed Exit** (`LYING`/`SITTING` $\to$ `WALKING`) | `MONITOR` | Patient has initiated unassisted bed departure; staff notified to monitor. |
+| **Missing Resident** (`WALKING` $\to$ `UNKNOWN`) | `ALERT` | Patient left the bed and is no longer visible in camera view (high fall/wandering risk). |
+| **Bed Return** (`WALKING` $\to$ `LYING`/`SITTING`) | `MONITOR` | Resident has safely returned to bed. |
+| **Prolonged Out-of-Bed** ($>10\text{s}$) | `ALERT` | Extended absence without return confirmation. |
+| **Edge-Sit Hovering** ($>10\text{s}$) | `MONITOR` | Prolonged sitting on bed edge indicates hesitation, fatigue, or unassisted transfer risk. |
 
 ---
 
-## 5. Clinical Alert Rules Justification
+## 4. Project Directory Structure
 
-| Condition | Decision | Clinical Justification |
-| --- | --- | --- |
-| Normal lying/sitting/standing/walking | `NORMAL` | Expected baseline activity in patient room. |
-| Sitting on bed edge $> 300\text{s}$ (5 min) | `MONITOR` | Prolonged edge-sitting indicates hesitation, fatigue, or imminent unassisted exit risk. |
-| `UNKNOWN` sustained $> 60\text{s}$ (1 min) | `MONITOR` | Prolonged sensor occlusion requires staff check-in. |
-| Confirmed bed exit, out of bed $> 600\text{s}$ (10 min) | `ALERT` | Elderly patient unassisted out of bed for extended period presents high fall/wandering risk. |
-| Horizontal posture detected off-bed | `ALERT` | High-priority fall detection emergency. |
-| Bed exit with no return by observation end | `ALERT` | Patient has not returned to bed safely. |
-| Caregiver present in room | **Suppress 1 Level** | Assisted patient movement: `ALERT` $\to$ `MONITOR`, `MONITOR` $\to$ `NORMAL`. |
+```
+BedSenseAI/
+├── configs/
+│   └── configurations.yaml      # Master thresholds, models, artifacts & logging config
+├── data/
+│   ├── sample1.mp4              # Benchmark test videos
+│   ├── sample2.mp4
+│   ├── sample2.json             # Ground truth annotation for sample 2
+│   ├── sample3.mp4
+│   └── sample3.json             # Ground truth annotation for sample 3
+├── eval/                        # Benchmark Evaluation Engine
+│   ├── __init__.py
+│   ├── evaluate.py              # End-to-end evaluation entrypoint & CLI reporter
+│   ├── metrics.py               # Activity recognition, bed-exit precision/recall & duration error
+│   └── report.py                # ANSI terminal and markdown formatted comparison tables
+├── models/                      # Dedicated weight store (models auto-download here)
+│   ├── yolo11n.pt               # Bed detector model
+│   ├── yolo11l-pose.pt          # Pose estimation model (17 COCO keypoints)
+│   └── yolov8s-worldv2.pt       # Optional open-vocabulary YOLO-World model
+├── outputs/                     # Generated visual and clinical report artifacts
+│   ├── sample2/
+│   └── sample3/
+├── scripts/
+│   └── test_vlm.py              # Standalone direct VLM diagnostic prompting script
+├── src/
+│   ├── agent/                   # LangGraph workflow, Ollama client & tool suite
+│   ├── evidence/                # Biomechanical multi-attribute evidence engine
+│   ├── policy/                  # Clinical policy rules and report generators
+│   ├── state/                   # Sequence pattern matcher for bed events
+│   ├── streaming/               # Real-time online streaming state processor
+│   ├── vision/                  # Vision detection, ByteTrack tracking & model resolution
+│   ├── cli.py                   # Unified command-line interface implementation
+│   ├── constants.py             # Canonical constants and color palettes
+│   ├── contracts.py             # Dataclass schemas for frames, segments, and events
+│   ├── exporter.py              # Decoupled artifact exporter and video annotator
+│   ├── logging_config.py        # Multi-tiered production lifecycle logging formatter
+│   └── main.py                  # Standard CLI entrypoint
+├── tests/                       # Complete unit and integration test suite (44+ tests)
+├── docker-compose.yml           # Multi-container orchestration (Ollama + BedSense App)
+├── Dockerfile                   # CUDA 12.1 + PyTorch + OpenCV container environment
+├── requirements.txt             # Python production dependencies
+├── run.ipynb                    # Interactive Jupyter notebook for inference & evaluation
+└── README.md                    # System documentation
+```
 
 ---
 
-## 6. Model Choices & Local Docker Setup
+## 5. Environment Setup & Quickstart Guide
 
-- **Vision**: `yolo11n-pose.pt` (17 COCO keypoints + ByteTrack) provides single-pass detection, tracking, and pose at $>60$ FPS.
-- **Agent LLM**: Qwen (e.g. `qwen2.5:3b` / `qwen3:4b` via Ollama) handles narrow, structured decision-making over pre-computed signals.
-- **VLM Tool**: `qwen2.5-vl:3b` (via Ollama) is called on-demand when visual ambiguity cannot be resolved by geometry alone (e.g., blanket occlusion).
+Follow these steps **in order** to build the environment and bring up the system:
 
----
+### Step 1: Prerequisites & GPU Drivers
+Ensure you have installed:
+- **Docker Desktop** (with WSL2 backend on Windows or standard Docker daemon on Linux).
+- **NVIDIA GPU Drivers & NVIDIA Container Toolkit** (for hardware acceleration).
+  > [!NOTE]
+  > If running without a GPU, the containers will fall back to CPU execution automatically.
 
-## 7. Quickstart & How to Run
-
-### Option A: Using Docker Compose (Recommended)
+### Step 2: Build the Docker Image
+Build the container images from scratch to prepare all PyTorch and OpenCV dependencies:
 
 ```bash
-# 1. Start Ollama and BedSense Application
+docker compose build
+```
+
+### Step 3: Launch the Services
+Start the Ollama daemon and the BedSense vision application in detached mode:
+
+```bash
 docker compose up -d
-
-# 2. Pull Qwen models into Ollama container
-docker exec bedsense_ollama ollama pull qwen2.5:3b
-docker exec bedsense_ollama ollama pull qwen2.5-vl:3b
 ```
 
-**Run CLI in PowerShell (Windows):**
-```powershell
-docker exec elderly_vision_app python -m src.cli `
-  --video old/data/sample1.mp4 `
-  --output-dir outputs/sample1 `
-  --annotated-video outputs/sample1/annotated.mp4
-```
+Verify that both containers (`bedsense_ollama` and `elderly_vision_app`) are healthy and running:
 
-*Or as a single line in PowerShell / CMD:*
-```powershell
-docker exec elderly_vision_app python -m src.cli --video old/data/sample1.mp4 --output-dir outputs/sample1 --annotated-video outputs/sample1/annotated.mp4
-```
-
-**Run CLI in Bash (Linux/macOS):**
 ```bash
-docker exec elderly_vision_app python -m src.cli \
-  --video old/data/sample1.mp4 \
-  --output-dir outputs/sample1 \
-  --annotated-video outputs/sample1/annotated.mp4
+docker ps
 ```
 
-### Option B: Interactive Jupyter Notebook
+### Step 4: Automatic Model Download on Startup
+When BedSense AI starts up, the built-in `OllamaClient` automatically checks the Ollama service:
+- It queries `http://ollama:11434/api/tags` to check if `qwen2.5:3b` and `qwen2.5vl:3b` are present.
+- If any required model is missing from the local cache, the application automatically requests and downloads the model from the Ollama registry via the API before executing agentic reasoning.
+- No manual terminal pull commands are required!
 
-Launch JupyterLab at `http://localhost:8888` and open [`run.ipynb`](run.ipynb) to execute each stage interactively with visual HUD previews.
+---
 
-### Option C: Run Unit Tests
+## 6. Interactive Execution via Jupyter Notebook (`run.ipynb`)
+
+An interactive notebook [`run.ipynb`](run.ipynb) is provided in the repository root for running the complete end-to-end pipeline, viewing live state transitions and clinical alerts, executing the benchmark evaluation, and inspecting JSON artifacts.
+
+### Accessing JupyterLab
+1. Open your browser and navigate to:
+   ```
+   http://localhost:8888
+   ```
+2. In the file browser on the left, double-click **`run.ipynb`**.
+
+### Notebook Workflow Overview
+
+The notebook contains dedicated, ready-to-run cells:
+
+- **Cell 1 — Trigger Pipeline on Sample 2**:
+  ```python
+  !python -m src.main --video data/sample2.mp4 --output-dir outputs/sample2
+  ```
+  Runs perception, evidence extraction, state smoothing, and clinical policy on `sample2.mp4` with formatted production startup summaries and live state transition logs.
+
+- **Cell 2 — Trigger Pipeline on Sample 3**:
+  ```python
+  !python -m src.main --video data/sample3.mp4 --output-dir outputs/sample3
+  ```
+  Runs the pipeline on `sample3.mp4` and exports `timeline.json`, `events.json`, and `summary.json` to `outputs/sample3`.
+
+- **Cell 3 — Run Benchmark Evaluation**:
+  ```python
+  !python -m eval.evaluate
+  ```
+  Compares the generated output artifacts against ground truth annotations (`data/sample2.json` and `data/sample3.json`), printing Activity Recognition accuracy, Bed Event precision/recall, and Duration Estimation error tables.
+
+- **Cell 4 — Interactive Python API & Artifact Inspector**:
+  ```python
+  import json
+  from pathlib import Path
+  from src.cli import process_video_cli
+
+  # Execute programmatically
+  process_video_cli(
+      video_path="data/sample3.mp4",
+      output_dir="outputs/sample3",
+      save_json=True,
+      save_video=False,
+  )
+
+  # Pretty-print summary artifact
+  with open("outputs/sample3/summary.json", "r") as f:
+      print(json.dumps(json.load(f), indent=2))
+  ```
+
+---
+
+## 7. Running via Command Line (CLI)
+
+You can execute the pipeline directly inside the Docker container using `python -m src.main`:
+
+### Standard Video Processing (JSON Reports + Fast Inference)
+```powershell
+docker exec elderly_vision_app python -m src.main `
+  --video data/sample2.mp4 `
+  --output-dir outputs/sample2
+```
+
+### Video Processing with Annotated MP4 Rendering
+```powershell
+docker exec elderly_vision_app python -m src.main `
+  --video data/sample3.mp4 `
+  --output-dir outputs/sample3 `
+  --save-video
+```
+
+### Enable Frame-by-Frame Telemetry CSV
+```powershell
+docker exec elderly_vision_app python -m src.main `
+  --video data/sample2.mp4 `
+  --output-dir outputs/sample2 `
+  --save-telemetry
+```
+
+### CLI Command Options
+
+| Flag | Type | Description |
+| :--- | :--- | :--- |
+| `--video` | string (required) | Path to input video file (e.g. `data/sample2.mp4`). |
+| `--output-dir` | string | Target directory for generated reports and video (default: `outputs`). |
+| `--save-video` / `--no-video` | boolean | Enable/disable annotated MP4 video rendering (default: config-driven). |
+| `--save-json` / `--no-json` | boolean | Enable/disable clinical JSON reports export (default: config-driven). |
+| `--save-telemetry` / `--no-telemetry` | boolean | Enable/disable `telemetry.csv` frame recording (default: `false`). |
+| `--enable-agent` / `--no-agent` | boolean | Enable/disable LangGraph Agent reasoning layer (default: `true`). |
+| `--fps` | float | Target processing sampling rate (default: `10.0` FPS). |
+| `--log-level` | string | Verbosity level: `PROD`, `INFO`, `AGENT`, `DEBUG`. |
+| `--detector-model` | string | Path to YOLO detection model (default: `models/yolo11n.pt`). |
+| `--pose-model` | string | Path to YOLO pose model (default: `models/yolo11l-pose.pt`). |
+| `--config` | string | Path to YAML config file (default: `configs/configurations.yaml`). |
+
+---
+
+## 8. Benchmark Evaluation Suite (`eval/`)
+
+BedSense AI includes a quantitative benchmark evaluation module designed to validate system accuracy against ground truth clinical annotations.
+
+### Running the Evaluation
+```powershell
+docker exec elderly_vision_app python -m eval.evaluate
+```
+
+The evaluator assesses 3 core clinical dimensions:
+
+1. **Activity Recognition**:
+   - Time-weighted frame classification accuracy.
+   - Per-class precision, recall, and F1-score across all 6 canonical states.
+   - Identification of confusions between similar biomechanical states (e.g., Sitting vs. Lying).
+2. **Bed Events**:
+   - Bed-exit & Bed-return precision, recall, and false alarm rates.
+   - Temporal event alignment (matching detected events within tolerance window).
+3. **Duration Estimation**:
+   - Ground truth duration vs. Predicted duration per activity state (formatted as `MM:SS`).
+   - Mean absolute error (MAE) and conservation invariant validation.
+
+### Sample Benchmark Results
+
+```
+====================================================================================================
+                       BEDSENSE AI BENCHMARK EVALUATION REPORT
+====================================================================================================
+
+📊 DATASET: sample2 (sample2.mp4)
+----------------------------------------------------------------------------------------------------
+  Overall Activity Recognition Accuracy: 94.2% (Time-weighted over 00:04:51)
+
+  Activity Recognition Breakdown:
+  Activity State            | Ground Truth  | Predicted    | Duration Error | Precision | Recall
+  --------------------------------------------------------------------------------------------------
+  Lying In Bed              | 02:40 (160s)  | 02:43 (163s) | +3s ( 1.9%)    | 98.2%     | 98.8%
+  Sitting On Bed            | 00:05 (  5s)  | 00:13 ( 13s) | +8s (160.0%)   | 38.5%     | 100.0%
+  Sitting Outside Bed       | 00:00 (  0s)  | 00:00 (  0s) |  0s ( 0.0%)    | 100.0%    | 100.0%
+  Standing                  | 00:00 (  0s)  | 00:00 (  0s) |  0s ( 0.0%)    | 100.0%    | 100.0%
+  Walking                   | 00:10 ( 10s)  | 00:09 (  9s) | -1s (10.0%)    | 88.9%     | 80.0%
+  Unknown                   | 01:56 (116s)  | 01:46 (106s) | -10s ( 8.6%)   | 99.1%     | 91.4%
+
+  Bed Event Metrics:
+  • Bed-Exit Detection:     Precision: 100.0% | Recall: 100.0% | False Detections: 0
+  • Bed-Return Detection:   Precision: 100.0% | Recall: 100.0% | False Detections: 0
+====================================================================================================
+```
+
+---
+
+## 9. Direct VLM Diagnostic Tool
+
+A standalone diagnostic script is provided in [`scripts/test_vlm.py`](scripts/test_vlm.py) to directly inspect Qwen2.5-VL prompt responses on extracted video frames or images.
+
+### Freeform Posture Inspection
+```powershell
+docker exec elderly_vision_app python scripts/test_vlm.py `
+  --video data/sample2.mp4 `
+  --time 00:00:15
+```
+
+### Structured Clinical JSON Query
+```powershell
+docker exec elderly_vision_app python scripts/test_vlm.py `
+  --video data/sample2.mp4 `
+  --time 00:00:20 `
+  --format json
+```
+
+---
+
+## 10. Output Artifact Formats
+
+The pipeline generates standardized clinical JSON artifacts:
+
+### `events.json`
+```json
+[
+  {
+    "event": "bed_exit",
+    "start_time": "00:01:00",
+    "confirmed_time": "00:01:03",
+    "previous_state": "lying_in_bed",
+    "current_state": "walking",
+    "confidence": 0.75,
+    "decision": "MONITOR"
+  },
+  {
+    "event": "missing",
+    "start_time": "00:01:02",
+    "confirmed_time": "00:01:05",
+    "previous_state": "walking",
+    "current_state": "unknown",
+    "confidence": 0.95,
+    "decision": "ALERT"
+  }
+]
+```
+
+### `summary.json`
+```json
+{
+  "observation_duration_sec": 291,
+  "activity_duration_sec": {
+    "lying_in_bed": 163,
+    "sitting_on_bed": 13,
+    "sitting_outside_bed": 0,
+    "standing": 0,
+    "walking": 9,
+    "unknown": 106
+  },
+  "bed_exit_count": 2,
+  "bed_return_count": 2,
+  "total_in_bed_sec": 176,
+  "total_out_of_bed_sec": 115,
+  "longest_out_of_bed_period_sec": 57,
+  "final_state": "lying_in_bed"
+}
+```
+
+---
+
+## 11. Running the Automated Test Suite
+
+Execute the full automated test suite inside Docker:
 
 ```bash
 docker exec elderly_vision_app pytest tests/ -v
 ```
 
----
-
-## 8. Output Formats
-
-The pipeline generates outputs matching §6.2:
-
-- **`events.json`**:
-```json
-[
-  {
-    "event": "bed_exit",
-    "start_time": "00:05:08",
-    "confirmed_time": "00:05:20",
-    "previous_state": "sitting_on_bed",
-    "current_state": "walking",
-    "confidence": 0.92,
-    "decision": "MONITOR"
-  }
-]
-```
-
-- **`summary.json`**:
-```json
-{
-  "observation_duration_sec": 1200,
-  "activity_duration_sec": {
-    "lying_in_bed": 702,
-    "sitting_on_bed": 128,
-    "sitting_outside_bed": 95,
-    "standing": 63,
-    "walking": 167,
-    "unknown": 45
-  },
-  "bed_exit_count": 2,
-  "bed_return_count": 2,
-  "total_in_bed_sec": 830,
-  "total_out_of_bed_sec": 370,
-  "longest_out_of_bed_period_sec": 241,
-  "final_state": "lying_in_bed"
-}
-```
-
-- **`timeline.json`**:
-```json
-[
-  {"start": "00:00:00", "end": "00:04:32", "state": "LYING_IN_BED"}
-]
-```
-
-*Invariant Guarantee*: $\sum \text{activity\_duration\_sec} \equiv \text{observation\_duration\_sec}$.
-
----
-
-## 9. Failure Case Analysis (§11)
-
-1. **Heavy Blanket / Quilt Occlusion**:
-   - *Problem*: Blankets cover lower limbs, reducing knee/ankle keypoint confidences.
-   - *Mitigation*: Trigger 1 flags segment as ambiguous (`mean_kpt_conf < 0.40`). The Agent LLM inspects surrounding context and invokes `vlm_describe` to confirm patient presence.
-2. **Caregiver Occlusion / ID Switching**:
-   - *Problem*: Caregiver assisting bed exit occludes patient, leading to potential track ID switching.
-   - *Mitigation*: Trigger 5 detects multi-track presence in segment; Policy engine suppresses alert escalation by one level.
-3. **Bed Edge Hovering**:
-   - *Problem*: Borderline overlap ($0.40 - 0.60$) during edge sitting.
-   - *Mitigation*: Trigger 3 flags boundary hovering and applies `EDGE_SIT_MONITOR_SEC` timer for proactive fall prevention.
-
----
-
-## 10. Future Improvements with More Time
-
-- **3D Pose & Ground Plane Estimation**: Integrate monocular depth / 3D pose to compute metric vertical velocity for instantaneous fall impact detection.
-- **Edge TensorRT Compilation**: Export YOLO-Pose to TensorRT FP16 / INT8 engines to run real-time inference on edge devices (Jetson / Orin).
-- **Audio Multimodal Fusion**: Integrate acoustic event detection (cries for help, bed alarm beeps) into the Agent decision loop.
+**Test Suite Highlights**:
+- Data contract validation & duration conservation invariants (`test_contracts.py`)
+- Kinematic joint geometry & multi-attribute evidence weighting (`test_evidence.py`)
+- Dynamic temporal smoothing & transient blip absorption (`test_smoothing.py`)
+- Bed-exit / bed-return state sequence pattern matching (`test_pattern_matcher.py`)
+- Clinical alert policy rules & event routing (`test_policy_report.py`)
+- LangGraph agent workflow & visual inspection loops (`test_agent.py`)
+- Evaluation metrics calculations & ground truth parsing (`test_eval.py`)

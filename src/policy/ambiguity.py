@@ -1,5 +1,5 @@
 """
-Temporal Ambiguity Scoring & Confidence Evaluation for BedSense AI (§4.1 of Design Spec).
+Temporal Ambiguity Scoring & Confidence Evaluation for BedSense AI.
 """
 
 from typing import Any, List, Optional, Tuple

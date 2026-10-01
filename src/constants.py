@@ -1,5 +1,5 @@
 """
-BedSense AI Constants (§3 of Design Spec).
+BedSense AI Canonical Constants and Color Palettes.
 """
 
 from typing import Dict, List, Set, Tuple
