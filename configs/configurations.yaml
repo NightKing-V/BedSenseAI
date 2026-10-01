@@ -9,37 +9,42 @@ perception:
   bed_conf: 0.12 # Minimum confidence to detect bed/furniture bounding box
   tracker_config: "bytetrack.yaml" # Built-in ByteTrack multi-object tracker
   target_fps: 10.0 # Target processing frame rate
+  max_reacquire_dist: 180.0 # Pixel distance threshold for re-acquiring lost tracks
 
 bed:
-  # Bed-relation polygon overlap thresholds
-  in_bed_overlap_threshold: 0.50 # Fraction of person area over bed to consider 'in bed'
-  out_of_bed_overlap_threshold: 0.10 # Fraction below which person is considered 'out of bed'
-  edge_band_tolerance: 0.10 # Ambiguity band: [0.50 - 0.10, 0.50 + 0.10] hovering trigger
+  # Bed-relation continuous affinity & 2D polygon overlap thresholds
+  on_bed_threshold: 0.25 # Continuous multi-joint affinity threshold to consider resident 'in bed'
+  off_bed_threshold: 0.12 # Continuous affinity threshold below which resident is considered 'off bed'
+  in_bed_overlap_fallback: 0.30 # Bounding box polygon overlap fallback for on-bed classification
+  out_of_bed_overlap_fallback: 0.15 # Bounding box polygon overlap fallback for off-bed classification
 
-state_classification:
-  # Frame-level posture geometry rules
-  min_kpt_conf_unknown: 0.25 # Below this mean keypoint confidence -> UNKNOWN state
-  torso_angle_lying_threshold: 50.0 # Torso angle from vertical (>50 deg indicates horizontal/lying)
-  torso_angle_upright_max: 35.0 # Torso angle from vertical (<35 deg indicates upright/standing/sitting)
-  aspect_ratio_standing_min: 1.35 # Bounding box (height / width) > 1.35 indicates standing/walking
-  aspect_ratio_lying_max: 0.95 # Bounding box (height / width) < 0.95 indicates lying
-  knee_angle_bent_max: 135.0 # Knee angle (hip-knee-ankle) < 135 deg indicates bent legs/sitting
-  walking_velocity_threshold: 25.0 # Hip velocity (px/sec or normalized) to differentiate walking from standing
+evidence:
+  # Multi-attribute Biomechanical Evidence Accumulation Engine parameters
+  min_keypoint_conf: 0.25 # Minimum confidence for individual landmark extraction
+  minimum_confidence: 0.30 # Minimum winner score to output a definitive state vs UNKNOWN
+  window_size: 5 # Moving temporal window size for multi-joint velocity calculation
+  extended_knee_angle: 160.0 # Planar knee angle (hip-knee-ankle) > 160° indicates extended leg (lying/standing)
+  bent_knee_angle: 130.0 # Planar knee angle < 130° indicates flexed knee (sitting)
+  extended_hip_angle: 160.0 # Planar hip angle (shoulder-hip-knee) > 160° indicates extended hip (standing)
+  bent_hip_angle: 130.0 # Planar hip angle < 130° indicates flexed hip (sitting)
+  low_body_motion: 0.015 # Normalized velocity threshold for resting/stationary postures
+  high_body_motion: 0.035 # Normalized velocity threshold for locomotion/walking motion
+  torso_length_normalized_threshold: 1.25 # Normalized trunk scale ratio (torso_length / shoulder_width)
 
 temporal:
-  # Smoothing & temporal engine rules (§3 & §4)
-  min_segment_sec: 0.5 # State must be held >= 1.0s to form a distinct segment (collapses blips)
-  min_exit_confirm_sec: 3.0 # Sustained walking/out_of_bed duration required to confirm bed exit
+  # Real-time streaming temporal engine & state machine rules
+  min_segment_sec: 0.5 # Minimum duration a state must be held to confirm transition (fast in-bed handoff)
+  min_exit_confirm_sec: 3.0 # Sustained walking/out_of_bed duration required to confirm clinical bed exit
   return_window_sec: 10.0 # Max time window to complete return transition to bed
   context_window_sec: 5.0 # Surrounding context history window [t - 5s, t + 5s] provided to Agent LLM
 
 confidence:
-  # §4.1 Ambiguity scoring triggers
+  # Ambiguity scoring triggers
   mean_kpt_conf_ambiguous_threshold: 0.40 # Mean keypoint confidence < 0.4 triggers agent review
   edge_sit_hover_sec: 4.0 # Sustained time near bed edge boundary before triggering ambiguity
 
 agent:
-  # §5 Agent LLM & VLM settings via Ollama
+  # Agent LLM & VLM settings via Ollama
   ollama_base_url: "http://ollama:11434" # Ollama server endpoint in Docker network
   text_model: "qwen2.5:3b" # Text reasoning agent model (e.g. qwen2.5:3b, qwen3:4b)
   vlm_model: "qwen2.5vl:3b" # Vision language model for vlm_describe tool
@@ -48,7 +53,7 @@ agent:
   temperature: 0.1 # Low temperature for deterministic structured JSON output
 
 policy:
-  # §6.1 Alert policy rules
+  # Clinical Alert policy rules
   edge_sit_monitor_sec: 10.0 # Sitting on bed edge > 10s -> MONITOR
   unknown_monitor_sec: 10.0 # Sustained UNKNOWN > 10s -> MONITOR
   out_of_bed_alert_sec: 10.0 # Prolonged absence from bed > 10s -> ALERT

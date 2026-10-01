@@ -1,6 +1,6 @@
 """
 Command-Line Interface for BedSense AI Monitoring System.
-Executes the unified pipeline: Vision -> Temporal Processing -> State Mechanism.
+Executes the unified evidence-based pipeline: Vision -> Biomechanical Evidence Engine -> State Mechanism.
 
 Provides multi-level logging with high-visibility state transitions & bed events.
 """
@@ -17,13 +17,12 @@ import numpy as np
 import torch
 
 from .agent import LangGraphAgentWorkflow, OllamaClient
-from .evidence import EvidenceTemporalClassifier
+from .evidence import EvidenceTemporalClassifier, RuleBasedEvidenceExtractor
 from .exporter import ArtifactExporter, VideoAnnotator
 from .logging_config import load_config, logger, setup_logger
 from .policy import PolicyEngine, format_hms
 from .state import BedPatternMatcher
 from .streaming import StreamingProcessor
-from .temporal import FrameClassifier
 from .vision import BedRelationEngine, PerceptionDetector
 
 COCO_KEYPOINT_NAMES = [
@@ -50,7 +49,6 @@ def process_video_cli(
     device: Optional[str] = None,
     log_level: Optional[str] = None,
     enable_agent: bool = False,
-    compare_heuristic: bool = False,
     ollama_url: Optional[str] = None,
     text_model: Optional[str] = None,
     vlm_model: Optional[str] = None,
@@ -123,15 +121,34 @@ def process_video_cli(
     return_window_sec = float(temporal_cfg.get("return_window_sec", 10.0))
     context_window_sec = float(temporal_cfg.get("context_window_sec", 5.0))
 
-    # 2. Pipeline Engines: Primary Active Engine = Method 2 (Evidence Accumulator)
-    classifier_evidence = EvidenceTemporalClassifier()
-    pattern_matcher_evidence = BedPatternMatcher(min_exit_confirm_sec=min_exit_confirm_sec, return_window_sec=return_window_sec)
-    policy_evidence = PolicyEngine(edge_sit_monitor_sec=10.0, unknown_monitor_sec=10.0, out_of_bed_alert_sec=10.0)
+    # 2. Pipeline Engine: Evidence-Based Biomechanical Engine
+    evidence_cfg = cfg.get("evidence", {}) if isinstance(cfg, dict) else {}
+    evidence_extractor = RuleBasedEvidenceExtractor(
+        low_body_motion=float(evidence_cfg.get("low_body_motion", 0.015)),
+        high_body_motion=float(evidence_cfg.get("high_body_motion", 0.035)),
+        extended_knee_angle=float(evidence_cfg.get("extended_knee_angle", 160.0)),
+        bent_knee_angle=float(evidence_cfg.get("bent_knee_angle", 130.0)),
+        extended_hip_angle=float(evidence_cfg.get("extended_hip_angle", 160.0)),
+        bent_hip_angle=float(evidence_cfg.get("bent_hip_angle", 130.0)),
+        on_bed_threshold=float(evidence_cfg.get("on_bed_threshold", 0.25)),
+        off_bed_threshold=float(evidence_cfg.get("off_bed_threshold", 0.12)),
+        torso_length_normalized_threshold=float(evidence_cfg.get("torso_length_normalized_threshold", 1.25)),
+    )
+    classifier_evidence = EvidenceTemporalClassifier(
+        min_keypoint_conf=float(evidence_cfg.get("min_keypoint_conf", 0.25)),
+        window_size=int(evidence_cfg.get("window_size", 5)),
+        minimum_confidence=float(evidence_cfg.get("minimum_confidence", 0.30)),
+        evidence_extractor=evidence_extractor,
+    )
+    pattern_matcher = BedPatternMatcher(min_exit_confirm_sec=min_exit_confirm_sec, return_window_sec=return_window_sec)
 
-    # Method 1 (Heuristic Tree) initialized only if compare_heuristic=True
-    classifier_heuristic = FrameClassifier() if compare_heuristic else None
-    pattern_matcher_heuristic = BedPatternMatcher(min_exit_confirm_sec=min_exit_confirm_sec, return_window_sec=return_window_sec) if compare_heuristic else None
-    policy_heuristic = PolicyEngine(edge_sit_monitor_sec=10.0, unknown_monitor_sec=10.0, out_of_bed_alert_sec=10.0) if compare_heuristic else None
+    policy_cfg = cfg.get("policy", {}) if isinstance(cfg, dict) else {}
+    policy_engine = PolicyEngine(
+        edge_sit_monitor_sec=float(policy_cfg.get("edge_sit_monitor_sec", 10.0)),
+        unknown_monitor_sec=float(policy_cfg.get("unknown_monitor_sec", 10.0)),
+        out_of_bed_alert_sec=float(policy_cfg.get("out_of_bed_alert_sec", 10.0)),
+        caregiver_suppress_escalation=bool(policy_cfg.get("caregiver_suppress_escalation", True)),
+    )
 
     agent_workflow = None
     if enable_agent:
@@ -146,38 +163,24 @@ def process_video_cli(
     else:
         logger.info("Agent layer BYPASSED (evaluating direct temporal biomechanical state outputs).")
 
-    streaming_evidence = StreamingProcessor(
+    streaming = StreamingProcessor(
         min_segment_sec=min_segment_sec,
         context_window_sec=context_window_sec,
-        pattern_matcher=pattern_matcher_evidence,
-        policy_engine=policy_evidence,
+        pattern_matcher=pattern_matcher,
+        policy_engine=policy_engine,
         agent_workflow=agent_workflow,
         video_path=video_path,
         enable_agent=enable_agent,
     )
 
-    streaming_heuristic = None
-    if compare_heuristic and pattern_matcher_heuristic and policy_heuristic:
-        streaming_heuristic = StreamingProcessor(
-            min_segment_sec=min_segment_sec,
-            context_window_sec=context_window_sec,
-            pattern_matcher=pattern_matcher_heuristic,
-            policy_engine=policy_heuristic,
-            agent_workflow=agent_workflow,
-            video_path=video_path,
-            enable_agent=enable_agent,
-        )
-
-    annotated_frames_evidence: List[np.ndarray] = []
-    annotated_frames_heuristic: List[np.ndarray] = []
+    annotated_frames: List[np.ndarray] = []
     telemetry_records: List[Dict[str, Any]] = []
     frame_idx = 0
     sampled_count = 0
     start_wall_time = time.time()
 
     should_render_videos = save_videos or (annotated_video is not None)
-    mode_str = "DUAL COMPARISON (M1 Heuristic + M2 Evidence)" if compare_heuristic else "PRIMARY METHOD 2 (Evidence Biomechanics)"
-    logger.info(f"Pipeline Active: {mode_str} (Video Rendering: {'ENABLED' if should_render_videos else 'DISABLED'})...")
+    logger.info(f"Pipeline Active: Evidence-Based Biomechanics (Video Rendering: {'ENABLED' if should_render_videos else 'DISABLED'})...")
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -191,24 +194,15 @@ def process_video_cli(
             # 1. Vision Detection & Tracking
             obs = detector.get_primary_observation(frame, ts)
 
-            # 2. Active Primary Classification (Method 2)
-            state_m2, conf_m2 = classifier_evidence.classify(
+            # 2. Evidence-Based Biomechanical Classification
+            state, conf = classifier_evidence.classify(
                 obs,
                 bed_engine=bed_engine,
                 frame_width=float(frame_w),
                 frame_height=float(frame_h),
             )
-            live_m2 = streaming_evidence.process_frame(ts, state_m2, conf_m2, obs)
-            metrics_m2 = classifier_evidence.get_last_metrics()
-
-            # Optional Method 1 Classification if comparing
-            state_m1, conf_m1 = None, 0.0
-            live_m1 = None
-            metrics_m1 = {}
-            if compare_heuristic and classifier_heuristic and streaming_heuristic:
-                state_m1, conf_m1 = classifier_heuristic.classify(obs, bed_engine=bed_engine)
-                live_m1 = streaming_heuristic.process_frame(ts, state_m1, conf_m1, obs)
-                metrics_m1 = classifier_heuristic.get_last_metrics()
+            live_result = streaming.process_frame(ts, state, conf, obs)
+            metrics = classifier_evidence.get_last_metrics()
 
             bed_poly = bed_engine.polygon.tolist() if bed_engine.polygon is not None else None
             bed_bbox = bed_engine.bbox
@@ -227,32 +221,22 @@ def process_video_cli(
                 "person_bbox_h": round(obs.bbox[3] - obs.bbox[1], 2) if obs.bbox else "",
                 "bed_overlap": round(obs.bed_overlap, 3),
                 "mean_kpt_conf": round(obs.mean_kpt_conf, 3),
-
-                # Primary Active Method (Method 2 Evidence)
-                "instantaneous_state": state_m2,
-                "instantaneous_conf": round(conf_m2, 3),
-                "smoothed_state": live_m2["live_state"],
-                "smoothed_conf": round(live_m2["live_conf"], 3),
-                "evidence_lying": metrics_m2.get("evidence_lying", 0.0),
-                "evidence_sitting": metrics_m2.get("evidence_sitting", 0.0),
-                "evidence_standing": metrics_m2.get("evidence_standing", 0.0),
-                "evidence_walking": metrics_m2.get("evidence_walking", 0.0),
-                "mean_bed_affinity": metrics_m2.get("mean_bed_affinity", 0.0),
-                "torso_length_normalized": metrics_m2.get("torso_length_normalized", ""),
-                "knee_angle_deg": metrics_m2.get("knee_angle_deg", ""),
-                "hip_angle_deg": metrics_m2.get("hip_angle_deg", ""),
-                "body_center_velocity": metrics_m2.get("body_center_velocity", 0.0),
-                "ankle_velocity": metrics_m2.get("ankle_velocity", 0.0),
-                "knee_velocity": metrics_m2.get("knee_velocity", 0.0),
+                "instantaneous_state": state,
+                "instantaneous_conf": round(conf, 3),
+                "smoothed_state": live_result["live_state"],
+                "smoothed_conf": round(live_result["live_conf"], 3),
+                "evidence_lying": metrics.get("evidence_lying", 0.0),
+                "evidence_sitting": metrics.get("evidence_sitting", 0.0),
+                "evidence_standing": metrics.get("evidence_standing", 0.0),
+                "evidence_walking": metrics.get("evidence_walking", 0.0),
+                "mean_bed_affinity": metrics.get("mean_bed_affinity", 0.0),
+                "torso_length_normalized": metrics.get("torso_length_normalized", ""),
+                "knee_angle_deg": metrics.get("knee_angle_deg", ""),
+                "hip_angle_deg": metrics.get("hip_angle_deg", ""),
+                "body_center_velocity": metrics.get("body_center_velocity", 0.0),
+                "ankle_velocity": metrics.get("ankle_velocity", 0.0),
+                "knee_velocity": metrics.get("knee_velocity", 0.0),
             }
-
-            if compare_heuristic and live_m1:
-                record["m1_heuristic_state"] = state_m1
-                record["m1_heuristic_conf"] = round(conf_m1, 3)
-                record["m1_smoothed_state"] = live_m1["live_state"]
-                record["m1_smoothed_conf"] = round(live_m1["live_conf"], 3)
-                record["m1_torso_angle_deg"] = metrics_m1.get("torso_angle", "")
-                record["m1_velocity_px_sec"] = metrics_m1.get("velocity", 0.0)
 
             # Bed Geometry
             record["bed_bbox_x1"] = round(bed_bbox[0], 2) if bed_bbox else ""
@@ -277,26 +261,15 @@ def process_video_cli(
 
             telemetry_records.append(record)
 
-            # Debug Log
-            if compare_heuristic and live_m1:
-                logger.debug(
-                    f"[t={ts:06.2f}s] M1: {live_m1['live_state']:<16} ({live_m1['live_conf']*100:3.0f}%) | "
-                    f"M2: {live_m2['live_state']:<16} ({live_m2['live_conf']*100:3.0f}%) | "
-                    f"Affinity: {metrics_m2.get('mean_bed_affinity', 0):.2f}"
-                )
-            else:
-                logger.debug(
-                    f"[t={ts:06.2f}s] State: {live_m2['live_state']:<16} ({live_m2['live_conf']*100:3.0f}%) | "
-                    f"Affinity: {metrics_m2.get('mean_bed_affinity', 0):.2f} | Overlap: {obs.bed_overlap*100:4.1f}%"
-                )
+            logger.debug(
+                f"[t={ts:06.2f}s] State: {live_result['live_state']:<16} ({live_result['live_conf']*100:3.0f}%) | "
+                f"Affinity: {metrics.get('mean_bed_affinity', 0):.2f} | Overlap: {obs.bed_overlap*100:4.1f}%"
+            )
 
             # 4. Annotated Frame Rendering
             if should_render_videos:
-                frame_m2 = VideoAnnotator.render_frame_evidence(frame, obs, bed_engine, live_m2, metrics_m2)
-                annotated_frames_evidence.append(frame_m2)
-                if compare_heuristic and live_m1:
-                    frame_m1 = VideoAnnotator.render_frame_heuristic(frame, obs, bed_engine, live_m1, metrics_m1)
-                    annotated_frames_heuristic.append(frame_m1)
+                annotated_frame = VideoAnnotator.render_frame_evidence(frame, obs, bed_engine, live_result, metrics)
+                annotated_frames.append(annotated_frame)
 
             sampled_count += 1
             if max_frames and sampled_count >= max_frames:
@@ -311,72 +284,48 @@ def process_video_cli(
         frame_idx += 1
     cap.release()
 
-    if not streaming_evidence.raw_records:
+    if not streaming.raw_records:
         raise RuntimeError("No frames could be processed.")
 
     actual_duration = round(frame_idx / native_fps, 2) if frame_idx > 0 else total_dur_sec
     obs_duration = actual_duration
 
     # Finalize Streaming State Segments & Events
-    segs_m2, events_m2 = streaming_evidence.finalize(actual_duration)
+    segs, events = streaming.finalize(actual_duration)
 
-    logger.state(f"Completed Stream Ingestion. Generated {len(segs_m2)} Segments:")
-    for idx, seg in enumerate(segs_m2, 1):
+    logger.state(f"Completed Stream Ingestion. Generated {len(segs)} Segments:")
+    for idx, seg in enumerate(segs, 1):
         logger.state(f"  Seg {idx:02d}: [{format_hms(seg.start_t)} -> {format_hms(seg.end_t)}] {seg.state:<20} (Duration: {seg.duration:>4.1f}s, Conf: {seg.confidence*100:4.1f}%)")
 
-    # 5. Export Artifacts
-    if compare_heuristic and streaming_heuristic:
-        segs_m1, events_m1 = streaming_heuristic.finalize(actual_duration)
-        ArtifactExporter.export_all(
-            output_dir=output_dir,
-            segments_m1=segs_m1,
-            events_m1=events_m1,
-            segments_m2=segs_m2,
-            events_m2=events_m2,
-            obs_duration=obs_duration,
-            telemetry_records=telemetry_records,
-            frames_m1=annotated_frames_heuristic if should_render_videos else None,
-            frames_m2=annotated_frames_evidence if should_render_videos else None,
-            fps=fps,
-        )
-        ArtifactExporter.print_terminal_comparison(
-            obs_duration=obs_duration,
-            segments_m1=segs_m1,
-            events_m1=events_m1,
-            segments_m2=segs_m2,
-            events_m2=events_m2,
-            output_dir=output_dir,
-        )
-    else:
-        video_out_name = Path(annotated_video).name if annotated_video else "annotated.mp4"
-        ArtifactExporter.export_primary(
-            output_dir=output_dir,
-            segments=segs_m2,
-            events=events_m2,
-            obs_duration=obs_duration,
-            telemetry_records=telemetry_records,
-            frames=annotated_frames_evidence if should_render_videos else None,
-            video_name=video_out_name,
-            fps=fps,
-        )
-        ArtifactExporter.print_terminal_summary(
-            obs_duration=obs_duration,
-            segments=segs_m2,
-            events=events_m2,
-            output_dir=output_dir,
-        )
+    # 5. Export Primary Artifacts
+    video_out_name = Path(annotated_video).name if annotated_video else "annotated.mp4"
+    ArtifactExporter.export_primary(
+        output_dir=output_dir,
+        segments=segs,
+        events=events,
+        obs_duration=obs_duration,
+        telemetry_records=telemetry_records,
+        frames=annotated_frames if should_render_videos else None,
+        video_name=video_out_name,
+        fps=fps,
+    )
+    ArtifactExporter.print_terminal_summary(
+        obs_duration=obs_duration,
+        segments=segs,
+        events=events,
+        output_dir=output_dir,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="BedSense AI — Clinical Vision & Temporal State Monitoring Pipeline"
+        description="BedSense AI — Clinical Vision & Evidence-Based State Monitoring Pipeline"
     )
     parser.add_argument("--video", type=str, required=True, help="Input video file path")
     parser.add_argument("--output-dir", type=str, default="outputs", help="Output directory for reports and video")
     parser.add_argument("--save-videos", action="store_true", default=True, help="Export annotated MP4 video (default: True)")
     parser.add_argument("--no-videos", dest="save_videos", action="store_false", help="Disable annotated MP4 video rendering for maximum speed")
     parser.add_argument("--annotated-video", type=str, default=None, help="Optional custom annotated video output file path")
-    parser.add_argument("--compare-heuristic", action="store_true", default=False, help="Enable Method 1 (Heuristic) in parallel for side-by-side comparison (default: False)")
     parser.add_argument("--config", type=str, default="configs/configurations.yaml", help="Path to YAML configuration file")
     parser.add_argument("--fps", type=float, default=10.0, help="Target FPS sampling rate (default: 10.0)")
     parser.add_argument("--max-frames", type=int, default=None, help="Max frames to process")
@@ -419,7 +368,6 @@ def main():
         device=args.device,
         log_level=args.log_level,
         enable_agent=args.enable_agent,
-        compare_heuristic=args.compare_heuristic,
         ollama_url=args.ollama_url,
         text_model=args.text_model,
         vlm_model=args.vlm_model,

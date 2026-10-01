@@ -210,6 +210,7 @@ class PoseFeatures:
 
     body_axis_angle: Optional[float] = None
     body_axis_length: Optional[float] = None
+    torso_inclination_angle: Optional[float] = None
 
 
 class PoseFeatureExtractor:
@@ -239,11 +240,13 @@ class PoseFeatureExtractor:
 
         body_axis_angle = None
         body_axis_length = None
+        torso_inclination = None
         if landmarks.shoulder_center is not None and landmarks.hip_center is not None:
             dx = landmarks.hip_center[0] - landmarks.shoulder_center[0]
             dy = landmarks.hip_center[1] - landmarks.shoulder_center[1]
             body_axis_length = float(np.sqrt(dx**2 + dy**2))
             body_axis_angle = float(np.degrees(np.arctan2(dy, dx)))
+            torso_inclination = float(np.degrees(np.arctan2(abs(dy), abs(dx)))) if (dx**2 + dy**2) > 0 else None
 
         return PoseFeatures(
             track_id=track_id,
@@ -266,6 +269,7 @@ class PoseFeatureExtractor:
             torso_direction_y=torso_dy,
             body_axis_angle=body_axis_angle,
             body_axis_length=body_axis_length,
+            torso_inclination_angle=torso_inclination,
         )
 
     @staticmethod

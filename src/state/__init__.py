@@ -2,8 +2,7 @@
 State Machine & Pattern Matcher Subsystem for BedSense AI (§4.2 of Design Spec).
 """
 
-from ..policy import PolicyEngine, ReportGenerator, format_hms
-from ..temporal import FrameClassifier, TransitionSmoother, evaluate_ambiguity
+from ..policy import PolicyEngine, ReportGenerator, evaluate_ambiguity, format_hms
 from .matcher import BedPatternMatcher, CandidateEvent
 
 __all__ = [
@@ -13,7 +12,5 @@ __all__ = [
     "PolicyEngine",
     "ReportGenerator",
     "format_hms",
-    "FrameClassifier",
-    "TransitionSmoother",
     "evaluate_ambiguity",
 ]

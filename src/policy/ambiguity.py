@@ -13,10 +13,10 @@ def evaluate_ambiguity(
     candidate_events: Optional[List[Any]] = None,
 ) -> Tuple[bool, float, Optional[str]]:
     """
-    Evaluates segment against §4.1 ambiguity triggers:
-    1. mean_kpt_conf < 0.40
+    Evaluates segment against ambiguity triggers:
+    1. Low keypoint confidence (< 0.40)
     2. Candidate bed-exit/return boundary uncertainty
-    3. Bed overlap hovering in 0.40 - 0.60
+    3. Bed overlap hovering in [0.40, 0.60]
     4. Conflict: horizontal posture detected off-bed (fall risk)
     5. Track ID loss and reacquisition
     """

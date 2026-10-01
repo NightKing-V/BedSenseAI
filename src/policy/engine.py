@@ -4,6 +4,7 @@ Evaluates decision tiers (NORMAL, MONITOR, ALERT) and caregiver suppression.
 """
 
 import logging
+from typing import Optional
 from ..constants import (
     DECISION_ALERT,
     DECISION_MONITOR,
@@ -27,11 +28,15 @@ class PolicyEngine:
         unknown_monitor_sec: float = 10.0,
         out_of_bed_alert_sec: float = 10.0,
         suppress_with_caregiver: bool = True,
+        caregiver_suppress_escalation: Optional[bool] = None,
     ):
         self.edge_sit_monitor_sec = edge_sit_monitor_sec
         self.unknown_monitor_sec = unknown_monitor_sec
         self.out_of_bed_alert_sec = out_of_bed_alert_sec
-        self.suppress_with_caregiver = suppress_with_caregiver
+        if caregiver_suppress_escalation is not None:
+            self.suppress_with_caregiver = caregiver_suppress_escalation
+        else:
+            self.suppress_with_caregiver = suppress_with_caregiver
 
     def evaluate_event(
         self,

@@ -32,21 +32,17 @@ from .logging_config import (
     load_config,
     setup_logger,
 )
+from .evidence import (
+    ActivityDecision,
+    ActivityEvidence,
+    EvidenceTemporalClassifier,
+    RuleBasedEvidenceExtractor,
+)
 from .policy import (
     PolicyEngine,
     ReportGenerator,
-    format_hms,
-)
-from .state import (
-    BedPatternMatcher,
-    CandidateEvent,
-)
-from .streaming import StreamingProcessor
-from .temporal import (
-    FrameClassifier,
-    TransitionSmoother,
     evaluate_ambiguity,
-    smooth_states,
+    format_hms,
 )
 from .vision import BedRelationEngine, PerceptionDetector
 
@@ -56,11 +52,11 @@ __all__ = [
     "PerceptionDetector",
     # Streaming Layer
     "StreamingProcessor",
-    # Temporal Processing Layer
-    "FrameClassifier",
-    "TransitionSmoother",
-    "smooth_states",
-    "evaluate_ambiguity",
+    # Evidence Classification Layer
+    "EvidenceTemporalClassifier",
+    "RuleBasedEvidenceExtractor",
+    "ActivityEvidence",
+    "ActivityDecision",
     # LangGraph Agent Layer
     "LangGraphAgentWorkflow",
     "OllamaClient",

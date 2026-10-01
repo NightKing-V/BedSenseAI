@@ -107,10 +107,15 @@ class RuleBasedEvidenceExtractor:
             on_bed = bed_overlap >= 0.35
             off_bed = bed_overlap <= 0.15
 
-        is_horizontal = (
-            pose_features.torso_length_normalized is not None
-            and pose_features.torso_length_normalized > self.torso_length_normalized_threshold
-        )
+        # Determine posture geometry
+        torso_inc = pose_features.torso_inclination_angle
+        is_horizontal = (torso_inc is not None and torso_inc <= 45.0)
+
+        has_bent_hip = (hip_angle is not None and hip_angle < self.bent_hip_angle)
+        has_extended_hip = (hip_angle is not None and hip_angle >= self.extended_hip_angle)
+
+        has_bent_knee = (knee_angle is not None and knee_angle < self.bent_knee_angle)
+        has_extended_knee = (knee_angle is not None and knee_angle >= self.extended_knee_angle)
 
         # 3. Missing geometry fallback
         if knee_angle is None and hip_angle is None and body_vel is None and mean_affinity is None:
@@ -122,67 +127,97 @@ class RuleBasedEvidenceExtractor:
         walking = 0.0
 
         # --------------------------------------------------
-        # 4. LYING EVIDENCE (Dominates when on_bed)
+        # 4. LYING EVIDENCE (Dominates when on_bed and horizontal/resting)
         # --------------------------------------------------
         if on_bed:
-            lying += 0.55
-        elif not off_bed:
-            lying += 0.15
-
-        if is_horizontal:
-            lying += 0.30
-
-        if knee_angle is not None and knee_angle > self.extended_knee_angle:
-            lying += 0.20
-
-        if body_vel is not None and body_vel < self.low_body_motion:
-            lying += 0.25
+            if is_horizontal:
+                # Transverse/lateral in bed
+                lying += 0.70
+                if body_vel is not None and body_vel < self.low_body_motion:
+                    lying += 0.20
+                if has_extended_knee or has_extended_hip:
+                    lying += 0.10
+            elif has_bent_hip:
+                # Sitting upright in bed with flexed hips -> very low lying score
+                lying += 0.05
+            else:
+                # Longitudinal/angled in bed: extended body or resting posture
+                lying += 0.60
+                if has_extended_hip:
+                    lying += 0.20
+                if has_extended_knee:
+                    lying += 0.10
+                if body_vel is not None and body_vel < self.low_body_motion:
+                    lying += 0.15
+        elif is_horizontal:
+            # Horizontal outside bed (floor/fall)
+            lying += 0.40
+            if body_vel is not None and body_vel < self.low_body_motion:
+                lying += 0.30
 
         # --------------------------------------------------
         # 5. SITTING EVIDENCE (Sitting on Bed or Chair)
         # --------------------------------------------------
         if on_bed:
-            sitting += 0.30
+            if has_bent_hip:
+                # Clear biomechanical sitting: hip flexed < 130 deg
+                sitting += 0.70
+                if has_bent_knee:
+                    sitting += 0.20
+                if body_vel is not None and body_vel < self.low_body_motion:
+                    sitting += 0.10
+            elif has_bent_knee and not has_extended_hip:
+                # Flexed knees with non-extended hips
+                sitting += 0.45
+                if body_vel is not None and body_vel < self.low_body_motion:
+                    sitting += 0.15
+            else:
+                # Extended hips/legs or resting flat in bed
+                sitting += 0.05
         elif not off_bed:
-            sitting += 0.15
-
-        if knee_angle is not None and knee_angle < self.bent_knee_angle:
-            sitting += 0.40
-        if hip_angle is not None and hip_angle < self.bent_hip_angle:
-            sitting += 0.25
-
-        if body_vel is not None and body_vel < self.low_body_motion:
-            sitting += 0.15
+            # Near bed boundary / transition zone
+            if has_bent_hip or has_bent_knee:
+                sitting += 0.55
+                if body_vel is not None and body_vel < self.low_body_motion:
+                    sitting += 0.20
+            elif not is_horizontal and (body_vel is not None and body_vel < self.low_body_motion):
+                sitting += 0.20
+        else:
+            # Clear off bed (e.g. sitting on chair)
+            if has_bent_hip or has_bent_knee:
+                sitting += 0.60
+                if body_vel is not None and body_vel < self.low_body_motion:
+                    sitting += 0.25
 
         # --------------------------------------------------
-        # 6. STANDING EVIDENCE (Requires clearing the bed + upright posture)
+        # 6. STANDING EVIDENCE (Requires clearing the bed + upright stationary posture)
         # --------------------------------------------------
         if not on_bed and not is_horizontal:
-            if off_bed:
-                standing += 0.35
-            else:
-                standing += 0.15
-
-            if knee_angle is not None and knee_angle > self.extended_knee_angle:
-                standing += 0.25
-            if hip_angle is not None and hip_angle > self.extended_hip_angle:
-                standing += 0.20
             if body_vel is not None and body_vel < self.low_body_motion:
-                standing += 0.25
+                if off_bed:
+                    standing += 0.40
+                else:
+                    standing += 0.20
+                if has_extended_hip:
+                    standing += 0.25
+                if has_extended_knee:
+                    standing += 0.25
+                if not has_bent_hip and not has_bent_knee:
+                    standing += 0.10
 
         # --------------------------------------------------
-        # 7. WALKING EVIDENCE (Requires clearing the bed + motion + upright posture)
+        # 7. WALKING EVIDENCE (Requires clearing the bed + upright locomotion motion)
         # --------------------------------------------------
         if not on_bed and not is_horizontal:
             if off_bed:
-                walking += 0.35
+                walking += 0.30
             else:
-                walking += 0.15
+                walking += 0.10
 
             if body_vel is not None and body_vel > self.high_body_motion:
-                walking += 0.30
+                walking += 0.40
             if ankle_vel is not None and ankle_vel > self.high_body_motion:
-                walking += 0.20
+                walking += 0.25
             if knee_vel is not None and knee_vel > self.high_body_motion:
                 walking += 0.20
 
@@ -240,7 +275,7 @@ class ActivityDecisionMaker:
         is_in_bed_zone = on_bed or bed_overlap >= 0.25
 
         if best_raw_state == "LYING":
-            canonical = STATE_LYING_IN_BED if is_in_bed_zone else STATE_OUT_OF_BED
+            canonical = STATE_LYING_IN_BED
         elif best_raw_state == "SITTING":
             canonical = STATE_SITTING_ON_BED if is_in_bed_zone else STATE_SITTING_OUTSIDE_BED
         elif best_raw_state == "STANDING":
@@ -269,12 +304,13 @@ class EvidenceTemporalClassifier:
         min_keypoint_conf: float = 0.25,
         window_size: int = 5,
         minimum_confidence: float = 0.30,
+        evidence_extractor: Optional[RuleBasedEvidenceExtractor] = None,
     ):
         self.landmark_extractor = LandmarkExtractor(min_confidence=min_keypoint_conf)
         self.pose_extractor = PoseFeatureExtractor()
         self.occupancy_extractor = BedOccupancyExtractor()
         self.motion_tracker = EvidenceMotionTracker(window_size=window_size)
-        self.evidence_extractor = RuleBasedEvidenceExtractor()
+        self.evidence_extractor = evidence_extractor or RuleBasedEvidenceExtractor()
         self.decision_maker = ActivityDecisionMaker(minimum_confidence=minimum_confidence)
 
         self.last_decision: Optional[ActivityDecision] = None

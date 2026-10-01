@@ -23,9 +23,8 @@ from ..constants import (
     STATE_UNKNOWN,
 )
 from ..contracts import BedEvent, FrameObservation, StateSegment
-from ..policy import PolicyEngine, format_hms
+from ..policy import PolicyEngine, evaluate_ambiguity, format_hms
 from ..state import BedPatternMatcher, CandidateEvent
-from ..temporal import evaluate_ambiguity
 
 AGENT_LEVEL_NUM = 15
 STATE_LEVEL_NUM = 25
