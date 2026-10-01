@@ -1,0 +1,53 @@
+# ==============================================================================
+# BedSense AI — System Configuration and Decision Thresholds
+# ==============================================================================
+
+perception:
+  pose_model: "yolo11n-pose.pt" # Ultralytics pose model (17 COCO keypoints)
+  pose_conf: 0.25 # Minimum confidence to detect person/pose
+  tracker_config: "bytetrack.yaml" # Built-in ByteTrack multi-object tracker
+  target_fps: 10.0 # Target processing frame rate
+
+bed:
+  # Bed-relation polygon overlap thresholds
+  in_bed_overlap_threshold: 0.50 # Fraction of person area over bed to consider 'in bed'
+  out_of_bed_overlap_threshold: 0.10 # Fraction below which person is considered 'out of bed'
+  edge_band_tolerance: 0.10 # Ambiguity band: [0.50 - 0.10, 0.50 + 0.10] hovering trigger
+
+state_classification:
+  # Frame-level posture geometry rules
+  min_kpt_conf_unknown: 0.25 # Below this mean keypoint confidence -> UNKNOWN state
+  torso_angle_lying_threshold: 50.0 # Torso angle from vertical (>50 deg indicates horizontal/lying)
+  torso_angle_upright_max: 35.0 # Torso angle from vertical (<35 deg indicates upright/standing/sitting)
+  aspect_ratio_standing_min: 1.35 # Bounding box (height / width) > 1.35 indicates standing/walking
+  aspect_ratio_lying_max: 0.95 # Bounding box (height / width) < 0.95 indicates lying
+  knee_angle_bent_max: 135.0 # Knee angle (hip-knee-ankle) < 135 deg indicates bent legs/sitting
+  walking_velocity_threshold: 25.0 # Hip velocity (px/sec or normalized) to differentiate walking from standing
+
+temporal:
+  # Smoothing & temporal engine rules (§3 & §4)
+  min_segment_sec: 2.0 # State must be held >= 2.0s to form a distinct segment (collapses blips)
+  min_exit_confirm_sec: 3.0 # Sustained walking/out_of_bed duration required to confirm bed exit
+  return_window_sec: 30.0 # Max time window to complete return transition to bed
+  context_window_sec: 30.0 # Surrounding context history window [t - 30s, t + 30s] provided to Agent LLM
+
+confidence:
+  # §4.1 Ambiguity scoring triggers
+  mean_kpt_conf_ambiguous_threshold: 0.40 # Mean keypoint confidence < 0.4 triggers agent review
+  edge_sit_hover_sec: 4.0 # Sustained time near bed edge boundary before triggering ambiguity
+
+agent:
+  # §5 Agent LLM & VLM settings via Ollama
+  ollama_base_url: "http://localhost:11434" # Ollama server endpoint (use http://ollama:11434 inside Docker)
+  text_model: "qwen2.5:3b" # Text reasoning agent model (e.g. qwen2.5:3b, qwen3:4b)
+  vlm_model: "qwen2.5vl:3b" # Vision language model for vlm_describe tool
+  tool_call_limit: 4 # Hard cap on tool calls per ambiguous segment
+  timeout_sec: 30.0 # Request timeout in seconds
+  temperature: 0.1 # Low temperature for deterministic structured JSON output
+
+policy:
+  # §6.1 Alert policy rules
+  edge_sit_monitor_sec: 300.0 # Sitting on bed edge > 300s (5 min) -> MONITOR
+  unknown_monitor_sec: 60.0 # Sustained UNKNOWN > 60s (1 min) -> MONITOR
+  out_of_bed_alert_sec: 600.0 # Confirmed bed exit, out of bed > 600s (10 min) -> ALERT
+  caregiver_suppress_escalation: true # Presence of caregiver track lowers alert escalation by one level

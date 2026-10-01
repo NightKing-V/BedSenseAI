@@ -1,0 +1,49 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: bedsense_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_cache:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  elderly-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: elderly_vision_app
+    restart: unless-stopped
+    ports:
+      - "8888:8888"   # JupyterLab
+      - "8000:8000"   # FastAPI endpoint
+    volumes:
+      - ./:/workspace
+      - torch_cache:/root/.cache/torch
+      - yolo_cache:/root/.config/Ultralytics
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    depends_on:
+      - ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ipc: host
+
+volumes:
+  torch_cache:
+  yolo_cache:
+  ollama_cache:
