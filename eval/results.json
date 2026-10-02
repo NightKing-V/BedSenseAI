@@ -108,7 +108,7 @@
                 "gt_time": "00:00:59",
                 "pred_time": "00:01:00",
                 "delta_t_sec": 1.0,
-                "confidence": 0.75,
+                "confidence": 0.48,
                 "decision": "MONITOR"
               },
               {
@@ -371,7 +371,7 @@
                 "gt_time": "00:00:19",
                 "pred_time": "00:00:22",
                 "delta_t_sec": 2.67,
-                "confidence": 0.51,
+                "confidence": 0.85,
                 "decision": "MONITOR"
               }
             ],
@@ -393,7 +393,7 @@
                 "gt_time": "00:00:27",
                 "pred_time": "00:00:26",
                 "delta_t_sec": 0.67,
-                "confidence": 0.15,
+                "confidence": 0.75,
                 "decision": "MONITOR"
               }
             ],
@@ -415,7 +415,7 @@
                 "gt_time": "00:00:22",
                 "pred_time": "00:00:24",
                 "delta_t_sec": 2.33,
-                "confidence": 0.85,
+                "confidence": 0.75,
                 "decision": "ALERT"
               }
             ],

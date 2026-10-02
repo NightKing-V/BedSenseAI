@@ -4,7 +4,7 @@
 
 perception:
   detector_model: "models/yolo11n.pt" # YOLO-World / standard YOLO object detection model for bed auto-calibration
-  bed_classes: ["hospital bed", "bed", "mattress", "couch"] # Open-vocabulary text prompts for bed detection
+  bed_classes: ["hospital bed", "bed", "mattress", "couch"] # Open-vocabulary text prompts for bed detection when using yolo world models
   pose_model: "models/yolo11l-pose.pt" # Ultralytics pose model (17 COCO keypoints)
   pose_conf: 0.20 # Minimum confidence to detect person/pose
   bed_conf: 0.12 # Minimum confidence to detect bed/furniture bounding box
