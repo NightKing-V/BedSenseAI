@@ -15,10 +15,10 @@
 
 ---
 
-## 2. Sample Benchmark: `sample2`
+## 2. Sample Benchmark: `sample1`
 
-- **Ground Truth Source**: `/workspace/data/sample2.json`
-- **Predictions Directory**: `/workspace/outputs/sample2`
+- **Ground Truth Source**: `/workspace/data/sample1.json`
+- **Predictions Directory**: `/workspace/outputs/sample1`
 - **Observation Duration**: `00:04:50` (290s)
 
 ### 2.1 Activity Recognition Performance
@@ -64,10 +64,10 @@
 
 ---
 
-## 3. Sample Benchmark: `sample3`
+## 3. Sample Benchmark: `sample2`
 
-- **Ground Truth Source**: `/workspace/data/sample3.json`
-- **Predictions Directory**: `/workspace/outputs/sample3`
+- **Ground Truth Source**: `/workspace/data/sample2.json`
+- **Predictions Directory**: `/workspace/outputs/sample2`
 - **Observation Duration**: `00:00:39` (39s)
 
 ### 2.1 Activity Recognition Performance

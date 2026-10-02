@@ -7,6 +7,21 @@ services:
       - "11434:11434"
     volumes:
       - ollama_cache:/root/.ollama
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        ollama serve &
+        SERVER_PID=$$!
+        echo "[Ollama Entrypoint] Waiting for Ollama daemon to initialize..."
+        until ollama list >/dev/null 2>&1; do
+          sleep 1
+        done
+        echo "[Ollama Entrypoint] Pre-loading BedSense AI models into persistent cache..."
+        ollama pull qwen2.5:3b
+        ollama pull qwen2.5vl:3b
+        echo "[Ollama Entrypoint] All models loaded successfully! Ready for inference."
+        wait $$SERVER_PID
     deploy:
       resources:
         reservations:

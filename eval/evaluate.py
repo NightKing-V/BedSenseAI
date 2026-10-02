@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--sample",
         type=str,
         default=None,
-        help="Specific sample name to evaluate (e.g. sample2, sample3). If omitted, evaluates all discovered samples.",
+        help="Specific sample name to evaluate (e.g. sample1, sample2). If omitted, evaluates all discovered samples.",
     )
     parser.add_argument(
         "--output-json",
@@ -90,7 +90,7 @@ def run_evaluation(
             "pred_dir": sample_pred_dir,
         })
     else:
-        # Discover all ground truth JSON files in gt_dir (sample2.json, sample3.json, etc.)
+        # Discover all ground truth JSON files in gt_dir (sample1.json, sample2.json, etc.)
         for gt_file in sorted(gt_path.glob("*.json")):
             s_name = gt_file.stem
             sample_pred_dir = pred_path / s_name

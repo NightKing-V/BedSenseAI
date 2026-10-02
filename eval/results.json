@@ -9,9 +9,9 @@
   },
   "samples": [
     {
-      "sample_name": "sample2",
-      "gt_file": "/workspace/data/sample2.json",
-      "pred_dir": "/workspace/outputs/sample2",
+      "sample_name": "sample1",
+      "gt_file": "/workspace/data/sample1.json",
+      "pred_dir": "/workspace/outputs/sample1",
       "activity_recognition": {
         "accuracy": 0.8489,
         "macro_f1": 0.6659,
@@ -272,9 +272,9 @@
       }
     },
     {
-      "sample_name": "sample3",
-      "gt_file": "/workspace/data/sample3.json",
-      "pred_dir": "/workspace/outputs/sample3",
+      "sample_name": "sample2",
+      "gt_file": "/workspace/data/sample2.json",
+      "pred_dir": "/workspace/outputs/sample2",
       "activity_recognition": {
         "accuracy": 0.7795,
         "macro_f1": 0.5755,

@@ -53,6 +53,8 @@ agent:
   ollama_base_url: "http://ollama:11434" # Ollama server endpoint in Docker network
   text_model: "qwen2.5:3b" # Text reasoning agent model (e.g. qwen2.5:3b, qwen3:4b)
   vlm_model: "qwen2.5vl:3b" # Vision language model for vlm_describe tool
+  # P. S. that qwen2.5:3b and qwen2.5vl:3b are the default models thats automatically loaded on startup.
+  # Run the following commands in the container to pull them if you want to change them: ollama pull qwen2.5:3b and ollama pull qwen2.5vl:3b
   tool_call_limit: 4 # Hard cap on tool calls per ambiguous segment
   timeout_sec: 30.0 # Request timeout in seconds
   temperature: 0.1 # Low temperature for deterministic structured JSON output
