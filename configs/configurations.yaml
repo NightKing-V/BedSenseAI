@@ -65,7 +65,7 @@ policy:
 
 artifacts:
   # Artifact export & recording settings
-  save_video: false # Render and export annotated visualization MP4 video
+  save_video: true # Render and export annotated visualization MP4 video
   save_json: true # Export clinical reports (timeline.json, events.json, summary.json)
   save_telemetry: false # Record and export frame-by-frame telemetry.csv (disabled by default for speed & memory)
 

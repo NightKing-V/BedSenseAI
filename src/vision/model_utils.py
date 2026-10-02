@@ -44,7 +44,6 @@ def resolve_model_path(model_path: Union[str, Path], default_dir: str = "models"
         Path("/model") / filename,
         Path("/workspace/models") / filename,
         Path("/workspace/model") / filename,
-        Path("weights") / filename,
     ]
 
     for cand in candidates:

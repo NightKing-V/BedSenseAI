@@ -66,12 +66,6 @@ class BedRelationEngine:
             self.is_calibrated = False
             return None
 
-        # Ensure CLIP cache directory exists for YOLO-World
-        try:
-            Path("scripts/weights/clip").mkdir(parents=True, exist_ok=True)
-            Path("weights/clip").mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
 
         boxes: List[Tuple[float, float, float, float]] = []
         try:
